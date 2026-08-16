@@ -30,7 +30,8 @@ def init_db():
             replaced INTEGER,
             memory_summary TEXT,
             last_summary_event_id INTEGER,
-            created_at REAL
+            created_at REAL,
+            directive TEXT
         );
         CREATE TABLE IF NOT EXISTS objects (
             id TEXT PRIMARY KEY,
@@ -67,8 +68,18 @@ def init_db():
             focus TEXT,
             updated_at REAL
         );
+        CREATE TABLE IF NOT EXISTS room_setting (
+            location TEXT PRIMARY KEY,
+            setting TEXT,
+            updated_at REAL
+        );
         """
     )
+    # Migration: `directive` was added to the characters table after initial release —
+    # existing databases won't have it yet, so add it if missing.
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(characters)").fetchall()]
+    if "directive" not in cols:
+        conn.execute("ALTER TABLE characters ADD COLUMN directive TEXT DEFAULT ''")
     conn.commit()
     conn.close()
 
@@ -84,17 +95,18 @@ def _row_to_char(row) -> Character:
         memory_summary=row["memory_summary"] or "",
         last_summary_event_id=row["last_summary_event_id"] or 0,
         created_at=row["created_at"],
+        directive=row["directive"] or "",
     )
 
 
 def add_character(c: Character):
     conn = get_conn()
     conn.execute(
-        "INSERT OR REPLACE INTO characters VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO characters VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             c.id, c.name, c.persona, c.health, c.stability,
             json.dumps(c.status_effects), c.location, int(c.alive), int(c.replaced),
-            c.memory_summary, c.last_summary_event_id, c.created_at,
+            c.memory_summary, c.last_summary_event_id, c.created_at, c.directive,
         ),
     )
     conn.commit()
@@ -172,6 +184,24 @@ def list_objects(location: Optional[str] = None) -> List[SimObject]:
         rows = conn.execute("SELECT * FROM objects").fetchall()
     conn.close()
     return [SimObject(id=r["id"], name=r["name"], description=r["description"], location=r["location"]) for r in rows]
+
+
+def get_object(obj_id: str) -> Optional[SimObject]:
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM objects WHERE id=?", (obj_id,)).fetchone()
+    conn.close()
+    return SimObject(id=row["id"], name=row["name"], description=row["description"], location=row["location"]) if row else None
+
+
+def update_object(o: SimObject):
+    add_object(o)  # INSERT OR REPLACE doubles as update
+
+
+def delete_object(obj_id: str):
+    conn = get_conn()
+    conn.execute("DELETE FROM objects WHERE id=?", (obj_id,))
+    conn.commit()
+    conn.close()
 
 
 # ---------------- events (the script log) ----------------
@@ -298,6 +328,25 @@ def get_room_focus(location: str) -> str:
     row = conn.execute("SELECT focus FROM room_focus WHERE location=?", (location,)).fetchone()
     conn.close()
     return row["focus"] if row and row["focus"] else ""
+
+
+# ---------------- room setting (a standing description of the physical space) ----------------
+
+def set_room_setting(location: str, setting: str):
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO room_setting VALUES (?,?,?)",
+        (location, setting, time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_room_setting(location: str) -> str:
+    conn = get_conn()
+    row = conn.execute("SELECT setting FROM room_setting WHERE location=?", (location,)).fetchone()
+    conn.close()
+    return row["setting"] if row and row["setting"] else ""
 
 
 # ---------------- interventions queue ----------------

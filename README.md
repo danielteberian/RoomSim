@@ -130,6 +130,52 @@ if a character's dialogue starts looking garbled, it's usually the model
 losing the format under load; a bigger model or a lower `SIM_TICK_SECONDS`
 (giving it less to hold in context) usually helps.
 
+### Switching to a different model (e.g. an uncensored one)
+
+The model is just a name in an env var — swapping it doesn't touch any code.
+
+1. **Pull it on the machine running Ollama** (your desktop, not the Pi):
+   ```bash
+   ollama pull dolphin-mistral
+   ```
+   Confirm it's there with `ollama list`.
+
+2. **Point the sim at it.** Two ways, depending on how you start the server:
+
+   - **`start_windows.bat`**: open it in a text editor and change these two
+     lines (both — the sim uses a second, usually-cheaper model just to referee
+     harm between characters, so if you want the uncensored model driving that
+     too, set both to the same name):
+     ```bat
+     set SIM_MODEL=dolphin-mistral
+     set SIM_ADJUDICATOR_MODEL=dolphin-mistral
+     ```
+     Save the file and double-click it as usual — no other changes needed.
+
+   - **Running `uvicorn` by hand / via a shell**: set the env vars before
+     starting the server instead:
+     ```bash
+     export SIM_MODEL=dolphin-mistral
+     export SIM_ADJUDICATOR_MODEL=dolphin-mistral
+     uvicorn main:app --host 0.0.0.0 --port 8000
+     ```
+
+3. **Restart the server.** The model is only read once at startup
+   (`config.py`), so a running server won't pick up the change — stop it
+   (Ctrl+C) and start it again.
+
+4. **Sanity-check it's actually being used**: watch the dashboard's script log
+   for the next couple of turns after restart. If dialogue style changes and
+   there are no `[error during tick: ...]` system lines, it's working. An
+   error there almost always means the model name doesn't exactly match what
+   `ollama list` shows (tags matter — `dolphin-mistral` and
+   `dolphin-mistral:8x7b` are different pulls).
+
+You can point `SIM_MODEL` and `SIM_ADJUDICATOR_MODEL` at two *different*
+models too — e.g. a bigger, better one for character voice and a smaller/
+faster one just for harm adjudication, same as the Claude setup does with
+Sonnet + Haiku.
+
 ## Run it as a service (so it survives reboots/SSH disconnects)
 
 Create `/etc/systemd/system/roomsim.service`:

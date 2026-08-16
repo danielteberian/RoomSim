@@ -63,6 +63,7 @@ def api_state():
         "objects": [o.__dict__ for o in objs],
         "events": [e.__dict__ for e in events],
         "room_focus": storage.get_room_focus("main_room"),
+        "room_setting": storage.get_room_setting("main_room"),
     }
 
 
@@ -128,6 +129,23 @@ def api_delete_character(char_id: str):
     return {"ok": True, "removed": c.name if c else char_id}
 
 
+class Directive(BaseModel):
+    text: str  # empty string clears the current directive
+
+
+@app.post("/api/characters/{char_id}/directive")
+def api_set_directive(char_id: str, body: Directive):
+    c = storage.get_character(char_id)
+    if not c:
+        return {"ok": False, "reason": "not found"}
+    c.directive = body.text.strip()
+    storage.update_character(c)
+    if c.directive:
+        storage.add_event("system", f"{c.name} is given a new objective.", character_id=char_id, character_name=c.name)
+        simulation.prioritize(char_id)
+    return {"ok": True}
+
+
 class MemoryEdit(BaseModel):
     summary: str
 
@@ -182,6 +200,34 @@ def api_add_object(body: NewObject):
     return o.__dict__
 
 
+class EditObject(BaseModel):
+    name: str
+    description: str
+    location: Optional[str] = None
+
+
+@app.post("/api/objects/{obj_id}/edit")
+def api_edit_object(obj_id: str, body: EditObject):
+    o = storage.get_object(obj_id)
+    if not o:
+        return {"ok": False, "reason": "not found"}
+    o.name = body.name
+    o.description = body.description
+    if body.location:
+        o.location = body.location
+    storage.update_object(o)
+    return {"ok": True, "object": o.__dict__}
+
+
+@app.post("/api/objects/{obj_id}/delete")
+def api_delete_object(obj_id: str):
+    o = storage.get_object(obj_id)
+    if o:
+        storage.delete_object(obj_id)
+        storage.add_event("system", f"The {o.name} is removed from the room.")
+    return {"ok": True}
+
+
 # ---------------- interventions ----------------
 
 class Intervene(BaseModel):
@@ -202,7 +248,20 @@ def api_intervene(char_id: str, body: Intervene):
         interventions.push(char_id, body.intensity or 5)
     elif body.type == "custom":
         interventions.custom(char_id, body.text or "Something happens.")
+    simulation.prioritize(char_id)
     return {"ok": True}
+
+
+class Interact(BaseModel):
+    actor_id: str
+    target_id: str
+    action: Optional[str] = None
+    dialogue: Optional[str] = None
+
+
+@app.post("/api/interact")
+def api_interact(body: Interact):
+    return simulation.force_interaction(body.actor_id, body.target_id, body.action or "", body.dialogue or "")
 
 
 # ---------------- chapters ----------------
@@ -245,6 +304,19 @@ def api_set_room_focus(body: RoomFocus):
         storage.add_event("system", f"The room's focus shifts: {body.focus.strip()}")
     else:
         storage.add_event("system", "The room's focus is cleared.")
+    return {"ok": True}
+
+
+class RoomSetting(BaseModel):
+    setting: str
+    location: str = "main_room"
+
+
+@app.post("/api/room/setting")
+def api_set_room_setting(body: RoomSetting):
+    storage.set_room_setting(body.location, body.setting.strip())
+    if body.setting.strip():
+        storage.add_event("system", f"The setting shifts: {body.setting.strip()}")
     return {"ok": True}
 
 

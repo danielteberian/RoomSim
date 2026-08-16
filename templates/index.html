@@ -34,11 +34,24 @@
 <body>
 
 <div id="sidebar">
+  <h3>Setting</h3>
+  <div id="settingDisplay"></div>
+  <textarea id="settingInput" placeholder="Describe the physical space, e.g. a cramped basement lit by one bare bulb, rain on the one window..." rows="2"></textarea>
+  <button class="btn" onclick="setSetting()">Set setting</button>
+  <button class="btn" onclick="clearSetting()">Clear</button>
+
   <h3>Scene focus</h3>
   <div id="focusDisplay"></div>
   <input id="focusInput" placeholder="e.g. a rumor about Priya, the storm outside...">
   <button class="btn" onclick="setFocus()">Set focus</button>
   <button class="btn" onclick="clearFocus()">Clear</button>
+
+  <h3>Force interaction</h3>
+  <select id="interactActor"></select>
+  <select id="interactTarget"></select>
+  <input id="interactAction" placeholder="action, e.g. shoves">
+  <input id="interactDialogue" placeholder="dialogue (optional)">
+  <button class="btn" onclick="forceInteraction()">Do it</button>
 
   <h3>Characters</h3>
   <div id="characters"></div>
@@ -88,7 +101,9 @@ async function refresh() {
   document.getElementById('runBtn').textContent = running ? 'Pause' : 'Resume';
   document.getElementById('status').textContent = running ? 'running' : 'paused';
   renderFocus(data.room_focus);
+  renderSetting(data.room_setting);
   renderCharacters(data.characters);
+  renderInteractSelectors(data.characters);
   renderObjects(data.objects);
   renderLog(data.events);
 }
@@ -106,6 +121,54 @@ function renderFocus(focus) {
   }
 }
 
+function renderSetting(setting) {
+  const display = document.getElementById('settingDisplay');
+  display.textContent = setting ? setting : 'No setting described — characters have no sense of the space they\'re in.';
+}
+
+async function setSetting() {
+  const setting = document.getElementById('settingInput').value.trim();
+  if (!setting) return alert('Enter a setting, or use Clear to remove the current one.');
+  await fetch('/api/room/setting', { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ setting }) });
+  document.getElementById('settingInput').value = '';
+  refresh();
+}
+async function clearSetting() {
+  await fetch('/api/room/setting', { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ setting: '' }) });
+  refresh();
+}
+
+function renderInteractSelectors(chars) {
+  const alive = chars.filter(c => c.alive);
+  const actorSel = document.getElementById('interactActor');
+  const targetSel = document.getElementById('interactTarget');
+  const prevActor = actorSel.value, prevTarget = targetSel.value;
+  const opts = alive.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  actorSel.innerHTML = opts;
+  targetSel.innerHTML = opts;
+  if (alive.some(c => c.id === prevActor)) actorSel.value = prevActor;
+  if (alive.some(c => c.id === prevTarget)) targetSel.value = prevTarget;
+}
+
+async function forceInteraction() {
+  const actor_id = document.getElementById('interactActor').value;
+  const target_id = document.getElementById('interactTarget').value;
+  const action = document.getElementById('interactAction').value.trim();
+  const dialogue = document.getElementById('interactDialogue').value.trim();
+  if (!actor_id || !target_id) return alert('Need at least two characters in the room.');
+  if (actor_id === target_id) return alert('Actor and target must be different characters.');
+  if (!action && !dialogue) return alert('Enter an action or dialogue.');
+  const res = await fetch('/api/interact', { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ actor_id, target_id, action, dialogue }) });
+  const data = await res.json();
+  if (!data.ok) alert(data.reason || 'Could not do that.');
+  document.getElementById('interactAction').value = '';
+  document.getElementById('interactDialogue').value = '';
+  refresh();
+}
+
 function renderCharacters(chars) {
   const el = document.getElementById('characters');
   el.innerHTML = chars.map(c => {
@@ -118,6 +181,10 @@ function renderCharacters(chars) {
           <button class="btn" onclick="intervene('${c.id}','disturb')">Disturb</button>
           <button class="btn" onclick="intervene('${c.id}','push')">Push</button>
           <button class="btn" onclick="killChar('${c.id}')">Kill</button>
+        </div>
+        <div>
+          <button class="btn" onclick="giveDirective('${c.id}','${jsEscape(c.name)}')">${c.directive ? 'Change directive' : 'Give directive'}</button>
+          ${c.directive ? `<button class="btn" onclick="clearDirective('${c.id}')">Clear directive</button>` : ''}
         </div>`;
     } else if (!c.replaced) {
       stateControls = `<div><button class="btn" onclick="replaceChar('${c.id}','${jsEscape(c.name)}')">Replace with new character</button></div>`;
@@ -133,6 +200,7 @@ function renderCharacters(chars) {
         <div class="bar"><div class="bar-fill stability-fill" style="width:${c.stability}%"></div></div>
         ${c.status_effects.length ? `<div style="font-size:11px;color:#e0a020">${escapeHtml(c.status_effects.join(', '))}</div>` : ''}
         <div class="mem-snippet">memory: ${escapeHtml(memSnippet)}</div>
+        ${c.directive ? `<div style="font-size:11px;color:#7fd0a0;font-style:italic;">objective: ${escapeHtml(c.directive)}</div>` : ''}
         ${stateControls}
         <div style="margin-top:4px;">
           <button class="btn" onclick="editMemory('${c.id}','${jsEscape(c.name)}')">Edit memory</button>
@@ -143,9 +211,29 @@ function renderCharacters(chars) {
 }
 
 function renderObjects(objs) {
-  document.getElementById('objects').innerHTML = objs.map(o =>
-    `<div style="font-size:12px;margin-bottom:4px;"><b>${escapeHtml(o.name)}</b>: ${escapeHtml(o.description)}</div>`
+  document.getElementById('objects').innerHTML = objs.map(o => `
+    <div style="font-size:12px;margin-bottom:8px;">
+      <div><b>${escapeHtml(o.name)}</b>: ${escapeHtml(o.description)}</div>
+      <button class="btn" onclick="editObject('${o.id}','${jsEscape(o.name)}','${jsEscape(o.description)}')">Edit</button>
+      <button class="btn btn-danger" onclick="removeObject('${o.id}','${jsEscape(o.name)}')">Remove</button>
+    </div>`
   ).join('') || '<div style="font-size:12px;color:#666">none yet</div>';
+}
+
+async function editObject(id, name, description) {
+  const newName = prompt('Object name:', name);
+  if (newName === null) return;
+  const newDesc = prompt('Object description:', description);
+  if (newDesc === null) return;
+  await fetch(`/api/objects/${id}/edit`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ name: newName.trim(), description: newDesc.trim() }) });
+  refresh();
+}
+
+async function removeObject(id, name) {
+  if (!confirm(`Remove "${name}" from the room?`)) return;
+  await fetch(`/api/objects/${id}/delete`, { method: 'POST' });
+  refresh();
 }
 
 function renderLog(events) {
@@ -154,7 +242,7 @@ function renderLog(events) {
   el.innerHTML = events.map(e => {
     const who = e.character_name || 'SYSTEM';
     if (e.kind === 'dialogue') return `<div class="line"><span class="who">${escapeHtml(who)}:</span> "${escapeHtml(e.content)}"</div>`;
-    if (e.kind === 'action') return `<div class="line">* ${escapeHtml(who)} ${escapeHtml(e.content)}</div>`;
+    if (e.kind === 'action') return `<div class="line">*${escapeHtml(who)} ${escapeHtml(e.content)}*</div>`;
     if (e.kind === 'thought') return `<div class="line kind-thought">(${escapeHtml(who)} thinks: ${escapeHtml(e.content)})</div>`;
     return `<div class="line kind-${e.kind}">${escapeHtml(e.content)}</div>`;
   }).join('');
@@ -228,6 +316,19 @@ async function insertThought(id) {
   if (!text) return;
   await fetch(`/api/characters/${id}/intervene`, { method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ type: 'insert_thought', text }) });
+  refresh();
+}
+async function giveDirective(id, name) {
+  const c = lastChars.find(x => x.id === id);
+  const text = prompt(`Give ${name} an objective to actively pursue (they'll work out how, in character):`, c ? c.directive : '');
+  if (text === null) return;
+  await fetch(`/api/characters/${id}/directive`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ text }) });
+  refresh();
+}
+async function clearDirective(id) {
+  await fetch(`/api/characters/${id}/directive`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ text: '' }) });
   refresh();
 }
 async function killChar(id) {

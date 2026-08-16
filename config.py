@@ -27,6 +27,12 @@ class Config:
     memory_window: int = int(os.environ.get("SIM_MEMORY_WINDOW", "20"))
     # Compress a character's memory into a running summary every N events
     summarize_every: int = 20
+    # Sampling temperature (0-1 on Anthropic; roughly 0-2 on Ollama, though most
+    # models are tuned around 0.7-1.0). Higher = less repetitive/more varied.
+    temperature: float = float(os.environ.get("SIM_TEMPERATURE", "1.0"))
+    # Ollama-only: penalizes tokens that already appeared recently, which is the
+    # main lever against small local models looping the same line verbatim.
+    ollama_repeat_penalty: float = float(os.environ.get("SIM_OLLAMA_REPEAT_PENALTY", "1.3"))
 
 
 CFG = Config()

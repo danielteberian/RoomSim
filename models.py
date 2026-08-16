@@ -16,6 +16,7 @@ class Character:
     replaced: bool = False             # true once a dead character has been replaced
     memory_summary: str = ""           # compressed long-term memory
     last_summary_event_id: int = 0     # bookkeeping for memory compression
+    directive: str = ""                # admin-given goal the character actively pursues until done
     created_at: float = field(default_factory=time.time)
 
 

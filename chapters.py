@@ -27,7 +27,7 @@ def _format_log(events) -> str:
         if e.kind == "dialogue":
             lines.append(f'{who} said: "{e.content}"')
         elif e.kind == "action":
-            lines.append(f"{who} {e.content}")
+            lines.append(f"*{who} {e.content}*")
         elif e.kind == "thought":
             lines.append(f"({who} privately thought: {e.content})")
         elif e.kind in ("system", "death", "intervention"):
@@ -44,11 +44,17 @@ def generate_and_store_chapter(date_str: str) -> Optional[dict]:
     user = f"Date: {date_str}\n\nRaw event log:\n{transcript}\n\nWrite the chapter now."
     result = call_llm_json(CHAPTER_SYSTEM, user, max_tokens=1800)
 
-    title = (result.get("title") or f"Chapter — {date_str}").strip()
+    title = (result.get("title") or "").strip()
     content = (result.get("content") or "").strip()
     if not content:
-        # Fallback so a parsing hiccup on a local model doesn't lose the day entirely
-        content = transcript
+        # The model didn't return usable prose even after call_llm_json's retry —
+        # fall back to the raw log rather than losing the day, but at least break
+        # it into readable paragraphs (one per speaker turn) instead of one wall
+        # of unbroken text, and say plainly that this isn't the real chapter.
+        title = f"Chapter — {date_str} (raw log, narration failed)"
+        content = "\n\n".join(_format_log(events).split("\n"))
+    elif not title:
+        title = f"Chapter — {date_str}"
 
     storage.add_chapter(date_str, title, content)
     return {"date": date_str, "title": title, "content": content}
