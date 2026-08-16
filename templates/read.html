@@ -1,0 +1,131 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Room</title>
+<style>
+  :root {
+    --bg: #faf6ee;
+    --text: #2a2620;
+    --muted: #8a8272;
+    --accent: #a8532e;
+    --card-bg: #f1ead9;
+    --border: #e3d9c4;
+  }
+  [data-theme="dark"] {
+    --bg: #17140f;
+    --text: #ece6d8;
+    --muted: #8f8873;
+    --accent: #d98a5f;
+    --card-bg: #211d16;
+    --border: #332c22;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+  }
+  #app { max-width: 640px; margin: 0 auto; padding: 24px 20px 80px; }
+  #topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom: 28px; }
+  #brand { font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .topbtns { display:flex; gap:8px; }
+  .iconbtn {
+    background: none; border: 1px solid var(--border); color: var(--text);
+    border-radius: 20px; padding: 6px 14px; font-size: 13px; font-family: -apple-system, sans-serif;
+    cursor: pointer; text-decoration: none; display: inline-block;
+  }
+  .chapter-card {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 14px; cursor: pointer;
+  }
+  .chapter-date { font-family: -apple-system, sans-serif; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .chapter-title { font-size: 21px; margin: 4px 0 8px; }
+  .chapter-snippet { color: var(--muted); font-size: 15px; line-height: 1.5; }
+  .empty-state { color: var(--muted); font-family: -apple-system, sans-serif; text-align: center; padding: 60px 20px; line-height: 1.7; font-size: 15px; }
+  #detail .chapter-title { font-size: 27px; margin-bottom: 4px; }
+  #detail .chapter-date { margin-bottom: 22px; }
+  #detail .body p { font-size: 18px; line-height: 1.75; margin: 0 0 1.2em; }
+  .back-link {
+    font-family: -apple-system, sans-serif; font-size: 14px; color: var(--accent);
+    background:none; border:none; cursor:pointer; padding:0; margin-bottom: 22px; display:inline-block;
+  }
+</style>
+</head>
+<body data-theme="dark">
+<div id="app">
+  <div id="topbar">
+    <div id="brand">The Room</div>
+    <div class="topbtns">
+      <a class="iconbtn" href="/">Admin</a>
+      <button class="iconbtn" onclick="toggleTheme()" id="themeBtn">Light</button>
+    </div>
+  </div>
+  <div id="view"></div>
+</div>
+
+<script>
+let chapterList = [];
+let theme = localStorage.getItem('room_theme') || 'dark';
+document.body.setAttribute('data-theme', theme);
+document.getElementById('themeBtn').textContent = theme === 'dark' ? 'Light' : 'Dark';
+
+function toggleTheme() {
+  theme = theme === 'dark' ? 'light' : 'dark';
+  document.body.setAttribute('data-theme', theme);
+  document.getElementById('themeBtn').textContent = theme === 'dark' ? 'Light' : 'Dark';
+  localStorage.setItem('room_theme', theme);
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function formatDate(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+async function loadList() {
+  const res = await fetch('/api/chapters');
+  chapterList = await res.json();
+  renderList();
+}
+
+function renderList() {
+  const el = document.getElementById('view');
+  if (chapterList.length === 0) {
+    el.innerHTML = `<div class="empty-state">No chapters yet. One gets written automatically once a day's story wraps up — check back tomorrow, or generate today's early from the admin panel.</div>`;
+    return;
+  }
+  el.innerHTML = chapterList.map(c => `
+    <div class="chapter-card" onclick="openChapter('${c.date}')">
+      <div class="chapter-date">${formatDate(c.date)}</div>
+      <div class="chapter-title">${escapeHtml(c.title)}</div>
+      <div class="chapter-snippet">${escapeHtml(c.content.slice(0, 140))}${c.content.length > 140 ? '…' : ''}</div>
+    </div>
+  `).join('');
+}
+
+async function openChapter(dateStr) {
+  const res = await fetch(`/api/chapters/${dateStr}`);
+  const c = await res.json();
+  const el = document.getElementById('view');
+  const paragraphs = c.content.split(/\n\s*\n/).map(p => `<p>${escapeHtml(p.trim())}</p>`).join('');
+  el.innerHTML = `
+    <div id="detail">
+      <button class="back-link" onclick="renderList()">‹ All chapters</button>
+      <div class="chapter-date">${formatDate(c.date)}</div>
+      <div class="chapter-title">${escapeHtml(c.title)}</div>
+      <div class="body">${paragraphs}</div>
+    </div>
+  `;
+  window.scrollTo(0, 0);
+}
+
+loadList();
+</script>
+</body>
+</html>
