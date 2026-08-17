@@ -180,6 +180,8 @@ function renderCharacters(chars) {
           <button class="btn" onclick="insertThought('${c.id}')">Insert thought</button>
           <button class="btn" onclick="intervene('${c.id}','disturb')">Disturb</button>
           <button class="btn" onclick="intervene('${c.id}','push')">Push</button>
+          <button class="btn" onclick="intervene('${c.id}','heal')">Heal</button>
+          <button class="btn" onclick="intervene('${c.id}','calm')">Calm</button>
           <button class="btn" onclick="killChar('${c.id}')">Kill</button>
         </div>
         <div>
@@ -198,11 +200,14 @@ function renderCharacters(chars) {
         <div><b>${escapeHtml(c.name)}</b> ${c.alive ? '' : '(dead)'}</div>
         <div class="bar"><div class="bar-fill health-fill" style="width:${c.health}%"></div></div>
         <div class="bar"><div class="bar-fill stability-fill" style="width:${c.stability}%"></div></div>
-        ${c.status_effects.length ? `<div style="font-size:11px;color:#e0a020">${escapeHtml(c.status_effects.join(', '))}</div>` : ''}
+        ${c.status_effects.length ? `<div style="font-size:11px;color:#e0a020">
+          ${c.status_effects.map(fx => `<span style="margin-right:6px;">${escapeHtml(fx)} <span style="cursor:pointer;color:#e08080;" onclick="removeStatusEffect('${c.id}','${jsEscape(fx)}')" title="Remove">✕</span></span>`).join('')}
+        </div>` : ''}
         <div class="mem-snippet">memory: ${escapeHtml(memSnippet)}</div>
         ${c.directive ? `<div style="font-size:11px;color:#7fd0a0;font-style:italic;">objective: ${escapeHtml(c.directive)}</div>` : ''}
         ${stateControls}
         <div style="margin-top:4px;">
+          ${c.alive ? `<button class="btn" onclick="addStatusEffect('${c.id}')">Add status effect</button>` : ''}
           <button class="btn" onclick="editMemory('${c.id}','${jsEscape(c.name)}')">Edit memory</button>
           <button class="btn btn-danger" onclick="removeChar('${c.id}','${jsEscape(c.name)}')">Remove entirely</button>
         </div>
@@ -329,6 +334,19 @@ async function giveDirective(id, name) {
 async function clearDirective(id) {
   await fetch(`/api/characters/${id}/directive`, { method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ text: '' }) });
+  refresh();
+}
+async function addStatusEffect(id) {
+  const effect = prompt('Status effect to give them (e.g. drunk, wounded, cursed):');
+  if (!effect || !effect.trim()) return;
+  const text = prompt('How does it happen, in a sentence (optional — leave blank for a generic line)?', '');
+  await fetch(`/api/characters/${id}/status_effect/add`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ effect: effect.trim(), text: text || null }) });
+  refresh();
+}
+async function removeStatusEffect(id, effect) {
+  await fetch(`/api/characters/${id}/status_effect/remove`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ effect }) });
   refresh();
 }
 async function killChar(id) {

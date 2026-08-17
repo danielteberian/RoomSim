@@ -91,6 +91,19 @@ def _clean_text(text: str) -> str:
     return text.strip()
 
 
+def as_text(value) -> str:
+    """Coerce a JSON-parsed field to a plain string. Local models occasionally
+    put a nested object or number where a string was asked for (e.g. a
+    "thought" field that comes back as {"content": "..."} instead of a plain
+    string) — callers that immediately do .strip() on a result field should
+    route it through this first instead of crashing the tick."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    return str(value)
+
+
 def call_llm(system: str, user: str, max_tokens: int = 600, model: str = None) -> str:
     if CFG.backend == "ollama":
         raw = _call_ollama(system, user, max_tokens, model)

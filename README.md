@@ -109,6 +109,13 @@ export SIM_ADJUDICATOR_MODEL=llama3.1:8b    # can be a smaller/faster model if y
 
 No `ANTHROPIC_API_KEY` needed in this mode.
 
+**Current defaults**: `SIM_BACKEND=ollama` and `SIM_MODEL`/
+`SIM_ADJUDICATOR_MODEL=dolphin-mistral` are now the built-in defaults in
+`config.py` (no env vars required to get that setup) — see
+[`docs/model-dolphin-mistral.md`](docs/model-dolphin-mistral.md) for why
+that model/size was picked and for AMD RX 590 GPU-acceleration caveats. Set
+the env vars above to override with a different model/host.
+
 **Windows convenience**: `start_windows.bat` sets the four env vars above (for
 running on the same PC as Ollama) and starts the server in one step — after
 the one-time venv setup, just double-click it.
@@ -283,10 +290,16 @@ storage.py            SQLite layer
 llm.py                 Anthropic / Ollama backend wrapper
 memory.py               prompt context building + memory compression
 interventions.py         zap / insert_thought / disturb / push / custom
-simulation.py              the turn loop + harm adjudication
-chapters.py                 daily raw log → narrative chapter
-main.py                      FastAPI app: dashboard, reading page, control API
-templates/index.html          the admin dashboard UI
-templates/read.html            the phone-friendly reading UI
-seed.py                         optional starter cast
+watchdog.py                repetition detector + session tick cap (docs/watchdog.md)
+simulation.py                the turn loop + harm adjudication
+chapters.py                    daily raw log → narrative chapter
+main.py                          FastAPI app: dashboard, reading page, control API
+templates/index.html              the admin dashboard UI
+templates/read.html                the phone-friendly reading UI
+seed.py                             optional starter cast
+docs/                                 design notes for specific subsystems
 ```
+
+See `ROBUSTNESS_TODO.md` for the running list of robustness work (memory,
+watchdog, tool calling, etc.) and `docs/` for design writeups of what's
+already landed.

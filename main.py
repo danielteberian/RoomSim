@@ -12,6 +12,7 @@ import chapters
 import interventions
 import storage
 import simulation
+import watchdog
 from config import CFG
 from models import Character, SimObject
 
@@ -32,7 +33,18 @@ async def _loop():
     while True:
         if RUNNING["on"]:
             try:
-                simulation.tick()
+                # tick() makes blocking HTTP calls to the model backend (and can now
+                # chain a few of them via retries) — run it in a worker thread so a
+                # slow/stuck model call doesn't freeze the whole server (dashboard
+                # polling, button clicks, etc) for the duration.
+                await asyncio.to_thread(simulation.tick)
+                if watchdog.session_cap_reached():
+                    RUNNING["on"] = False
+                    storage.add_event(
+                        "system",
+                        f"[watchdog] hit the {CFG.max_ticks_per_session}-tick session cap — "
+                        f"auto-pausing. Press Resume to keep going.",
+                    )
             except Exception as e:  # keep the loop alive across API hiccups etc.
                 storage.add_event("system", f"[error during tick: {e}]")
         await asyncio.sleep(CFG.tick_seconds)
@@ -44,7 +56,7 @@ async def _daily_chapter_loop():
         try:
             yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
             if not storage.has_chapter_for_date(yesterday) and storage.has_events_for_date(yesterday):
-                chapters.generate_and_store_chapter(yesterday)
+                await asyncio.to_thread(chapters.generate_and_store_chapter, yesterday)
         except Exception as e:
             storage.add_event("system", f"[daily chapter generation failed: {e}]")
         await asyncio.sleep(3600)
@@ -78,6 +90,7 @@ def api_pause():
 @app.post("/api/resume")
 def api_resume():
     RUNNING["on"] = True
+    watchdog.reset_session_cap()  # so a watchdog auto-pause doesn't immediately re-trip
     return {"running": True}
 
 
@@ -115,6 +128,7 @@ def api_kill(char_id: str):
     if c and c.alive:
         storage.kill_character(char_id)
         storage.add_event("death", f"{c.name} has died.", character_id=char_id, character_name=c.name)
+        watchdog.reset(char_id)
     return {"ok": True}
 
 
@@ -126,6 +140,7 @@ def api_delete_character(char_id: str):
     with the memory-edit endpoint below if the mistake already got baked in."""
     c = storage.get_character(char_id)
     storage.delete_character_hard(char_id)
+    watchdog.reset(char_id)
     return {"ok": True, "removed": c.name if c else char_id}
 
 
@@ -175,6 +190,7 @@ def api_replace(char_id: str, body: ReplaceCharacter):
         old.replaced = True
         old.health = 0
         storage.update_character(old)
+        watchdog.reset(old.id)
         who = old.name
         location = old.location
 
@@ -231,9 +247,11 @@ def api_delete_object(obj_id: str):
 # ---------------- interventions ----------------
 
 class Intervene(BaseModel):
-    type: str  # zap | insert_thought | disturb | push | custom
+    type: str  # zap | insert_thought | disturb | push | heal | calm | custom
     text: Optional[str] = None
     intensity: Optional[int] = None
+    health_delta: Optional[int] = None
+    stability_delta: Optional[int] = None
 
 
 @app.post("/api/characters/{char_id}/intervene")
@@ -246,10 +264,39 @@ def api_intervene(char_id: str, body: Intervene):
         interventions.disturb(char_id, body.intensity or 10)
     elif body.type == "push":
         interventions.push(char_id, body.intensity or 5)
+    elif body.type == "heal":
+        interventions.heal(char_id, body.intensity or 25)
+    elif body.type == "calm":
+        interventions.calm(char_id, body.intensity or 20)
     elif body.type == "custom":
-        interventions.custom(char_id, body.text or "Something happens.")
+        interventions.custom(char_id, body.text or "Something happens.",
+                              health_delta=body.health_delta or 0, stability_delta=body.stability_delta or 0)
     simulation.prioritize(char_id)
     return {"ok": True}
+
+
+class StatusEffect(BaseModel):
+    effect: str
+    text: Optional[str] = None  # flavor text for how it's introduced; defaults to a generic line
+
+
+@app.post("/api/characters/{char_id}/status_effect/add")
+def api_add_status_effect(char_id: str, body: StatusEffect):
+    effect = body.effect.strip()
+    if not effect:
+        return {"ok": False, "reason": "effect name required"}
+    interventions.add_status_effect(char_id, effect, body.text)
+    simulation.prioritize(char_id)
+    return {"ok": True}
+
+
+@app.post("/api/characters/{char_id}/status_effect/remove")
+def api_remove_status_effect(char_id: str, body: StatusEffect):
+    c = storage.get_character(char_id)
+    removed = storage.remove_status_effect(char_id, body.effect.strip())
+    if removed and c:
+        storage.add_event("system", f"{c.name} is no longer {body.effect.strip()}.", character_id=char_id, character_name=c.name)
+    return {"ok": removed}
 
 
 class Interact(BaseModel):

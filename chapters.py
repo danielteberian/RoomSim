@@ -7,7 +7,7 @@ what powers the /read page.
 from typing import Optional
 
 import storage
-from llm import call_llm_json
+from llm import call_llm_json, as_text
 
 CHAPTER_SYSTEM = """You are a skilled novelist adapting a raw event log from a life simulation into a short, \
 well-written narrative chapter. Turn the dialogue, actions, and internal thoughts into flowing third-person \
@@ -44,8 +44,8 @@ def generate_and_store_chapter(date_str: str) -> Optional[dict]:
     user = f"Date: {date_str}\n\nRaw event log:\n{transcript}\n\nWrite the chapter now."
     result = call_llm_json(CHAPTER_SYSTEM, user, max_tokens=1800)
 
-    title = (result.get("title") or "").strip()
-    content = (result.get("content") or "").strip()
+    title = as_text(result.get("title")).strip()
+    content = as_text(result.get("content")).strip()
     if not content:
         # The model didn't return usable prose even after call_llm_json's retry —
         # fall back to the raw log rather than losing the day, but at least break

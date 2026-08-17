@@ -117,6 +117,15 @@ def update_character(c: Character):
     add_character(c)  # INSERT OR REPLACE doubles as update
 
 
+def remove_status_effect(char_id: str, effect: str) -> bool:
+    c = get_character(char_id)
+    if not c or effect not in c.status_effects:
+        return False
+    c.status_effects.remove(effect)
+    update_character(c)
+    return True
+
+
 def get_character(char_id: str) -> Optional[Character]:
     conn = get_conn()
     row = conn.execute("SELECT * FROM characters WHERE id=?", (char_id,)).fetchone()

@@ -2,8 +2,9 @@ import re
 
 import memory
 import storage
+import watchdog
 from config import CFG
-from llm import call_llm_json
+from llm import call_llm_json, as_text
 
 _turn_state = {"idx": 0}
 _priority_queue = []  # character ids who were just addressed, so they respond promptly
@@ -13,7 +14,7 @@ Persona: {persona}
 Stay strictly in character. You do not know you are an AI. Respond ONLY as {name} would, given everything below.
 Your current state: health {health}/100, emotional stability {stability}/100{status_line}.
 Your standing memory of what's happened so far: {memory_summary}
-{setting_block}
+{status_effect_block}{setting_block}
 Other people currently in the room:
 {others}
 
@@ -111,7 +112,7 @@ def _adjudicate_harm(actor, target, action_text, dialogue_text):
         harm = int(result.get("harm", 0))
     except (TypeError, ValueError):
         harm = 0
-    reason = result.get("reason", "") or ""
+    reason = as_text(result.get("reason", ""))
     # Safety net: models occasionally contradict their own reasoning (say "no
     # contact" but still return nonzero harm). Trust the stated reason over the number.
     if harm > 0 and any(p in reason.lower() for p in _NO_CONTACT_PHRASES):
@@ -159,12 +160,14 @@ def force_interaction(actor_id, target_id, action_text="", dialogue_text=""):
             storage.kill_character(target.id)
             storage.add_event("death", f"{target.name} has died.",
                                character_id=target.id, character_name=target.name)
+            watchdog.reset(target.id)
 
     prioritize(target.id)  # target reacts next turn, in character
     return {"ok": True, "harm": harm, "reason": reason}
 
 
 def tick():
+    watchdog.record_tick()
     char = _next_character()
     if char is None:
         storage.add_event("system", "The room is empty. Add a character to continue.")
@@ -179,6 +182,12 @@ def tick():
     others, obj_desc, log_desc = memory.build_prompt_context(char, all_chars, objects, recent_events)
 
     status_line = f", status effects: {', '.join(char.status_effects)}" if char.status_effects else ""
+    status_effect_block = (
+        f"\nOngoing conditions currently affecting you, until further notice: {', '.join(char.status_effects)}. "
+        f"These aren't just labels — let them actually color how you speak, move, and think this turn (e.g. "
+        f"drunk should slur and misjudge things, wounded should wince and favor the injury, cursed should have "
+        f"visible small consequences), not just be mentioned once and forgotten.\n"
+    ) if char.status_effects else ""
     stimuli_block = (
         "\nSomething just happened to you, physically or mentally:\n" + "\n".join(stimuli_lines) + "\n"
     ) if stimuli_lines else ""
@@ -202,14 +211,16 @@ def tick():
         name=char.name, persona=char.persona, health=char.health, stability=char.stability,
         status_line=status_line, memory_summary=char.memory_summary or "(no strong memories yet)",
         others=others, objects=obj_desc, log=log_desc, stimuli_block=stimuli_block, focus_block=focus_block,
-        setting_block=setting_block, directive_block=directive_block,
+        setting_block=setting_block, directive_block=directive_block, status_effect_block=status_effect_block,
     )
     result = call_llm_json(system, "Respond now, in character, as JSON only.")
 
-    thought = (result.get("thought") or "").strip()
-    dialogue = (result.get("dialogue") or "").strip()
-    action = (result.get("action") or "").strip()
+    thought = as_text(result.get("thought")).strip()
+    dialogue = as_text(result.get("dialogue")).strip()
+    action = as_text(result.get("action")).strip()
     target_name = result.get("target")
+    if not isinstance(target_name, str):
+        target_name = as_text(target_name).strip() or None
 
     # Small/local models default to "just thinking" far too often — it's the path
     # of least resistance. One retry with a blunter instruction is cheap insurance
@@ -220,12 +231,14 @@ def tick():
             "Respond now, in character, as JSON only. Your last instinct was to leave dialogue and action both "
             "empty — that's not allowed. Say something out loud, or physically do something, right now.",
         )
-        retry_dialogue = (retry_result.get("dialogue") or "").strip()
-        retry_action = (retry_result.get("action") or "").strip()
+        retry_dialogue = as_text(retry_result.get("dialogue")).strip()
+        retry_action = as_text(retry_result.get("action")).strip()
         if retry_dialogue or retry_action:
-            thought = (retry_result.get("thought") or "").strip() or thought
+            thought = as_text(retry_result.get("thought")).strip() or thought
             dialogue, action = retry_dialogue, retry_action
-            target_name = retry_result.get("target") or target_name
+            retry_target = retry_result.get("target")
+            if isinstance(retry_target, str) and retry_target:
+                target_name = retry_target
     target = next((c for c in all_chars if c.name == target_name), None)
 
     if target and target.id != char.id and (dialogue or action):
@@ -247,10 +260,13 @@ def tick():
         storage.add_event("action", action, character_id=char.id, character_name=char.name,
                            target_id=target.id if target else None)
 
+    watchdog.check_repetition(char.id, char.name, dialogue, action)
+
     # Own health check (e.g. from an intervention this turn)
     if char.health <= 0 and char.alive:
         storage.kill_character(char.id)
         storage.add_event("death", f"{char.name} has died.", character_id=char.id, character_name=char.name)
+        watchdog.reset(char.id)
 
     # Let a cheap model referee whether this turn's action hurt someone else. Gated on
     # an actual physical action (not mere targeted dialogue) so ordinary conversation
@@ -266,5 +282,6 @@ def tick():
                 storage.kill_character(target.id)
                 storage.add_event("death", f"{target.name} has died.",
                                    character_id=target.id, character_name=target.name)
+                watchdog.reset(target.id)
 
     memory.maybe_summarize(char)
