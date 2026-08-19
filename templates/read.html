@@ -109,9 +109,12 @@ function renderList() {
   `).join('');
 }
 
+let currentChapter = null;
+
 async function openChapter(dateStr) {
   const res = await fetch(`/api/chapters/${dateStr}`);
   const c = await res.json();
+  currentChapter = c;
   const el = document.getElementById('view');
   const paragraphs = c.content.split(/\n\s*\n/).map(p => `<p>${escapeHtml(p.trim())}</p>`).join('');
   el.innerHTML = `
@@ -120,9 +123,24 @@ async function openChapter(dateStr) {
       <div class="chapter-date">${formatDate(c.date)}</div>
       <div class="chapter-title">${escapeHtml(c.title)}</div>
       <div class="body">${paragraphs}</div>
+      <button class="iconbtn" onclick="downloadChapter()">Download as text</button>
     </div>
   `;
   window.scrollTo(0, 0);
+}
+
+function downloadChapter() {
+  if (!currentChapter) return;
+  const text = `${currentChapter.title}\n${formatDate(currentChapter.date)}\n\n${currentChapter.content}\n`;
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${currentChapter.date} - ${currentChapter.title}.txt`.replace(/[\\/:*?"<>|]/g, '');
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 loadList();

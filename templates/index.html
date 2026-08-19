@@ -24,64 +24,117 @@
   .kind-thought { color:#888; font-style:italic; }
   .kind-system, .kind-death { color:#e0a020; }
   .kind-intervention { color:#e05050; }
+  .kind-weird { color:#c060c0; font-weight:600; }
   .kind-message { color:#9b7fd0; }
   .loc-badge { font-size:10px; color:#7aa0c0; }
+  .aggression-fill { background:#d06868; }
+  .char-group-header { font-size:11px; color:#777; text-transform:uppercase; letter-spacing:0.05em; margin:12px 0 4px; }
+  .char-summary { cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:6px; }
+  .char-summary:hover { opacity:0.85; }
+  .char-toggle { font-size:10px; color:#666; flex-shrink:0; }
+  input[type="number"] { width:70px; display:inline-block; }
+  .field-label { font-size:11px; color:#888; display:block; margin-top:4px; }
   #topbar { padding:8px 16px; background:#181818; border-bottom:1px solid #333; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   #focusBar { padding:6px 16px; background:#1c1710; border-bottom:1px solid #332a1a; font-size:12px; color:#d9a860; }
   input, textarea { background:#222; color:#eee; border:1px solid #444; border-radius:4px; padding:4px; width:100%; box-sizing:border-box; margin:2px 0; font-family:inherit; }
   h3 { margin: 10px 0 4px; font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:#888; }
+  h4 { margin: 10px 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:#777; }
   #focusDisplay { font-size:12px; color:#aaa; margin-bottom:6px; line-height:1.4; }
+  .sidebar-section { border-bottom:1px solid #2a2a2a; margin-bottom:4px; }
+  .sidebar-section > summary { cursor:pointer; padding:10px 0; font-size:13px; font-weight:600; color:#ddd; list-style:none; display:flex; justify-content:space-between; align-items:center; }
+  .sidebar-section > summary::-webkit-details-marker { display:none; }
+  .sidebar-section > summary::after { content:'▸'; color:#666; font-size:11px; }
+  .sidebar-section[open] > summary::after { content:'▾'; }
+  .sidebar-section > summary .count { font-size:11px; color:#666; font-weight:400; }
+  .sidebar-section-body { padding-bottom:10px; }
 </style>
 </head>
 <body>
 
 <div id="sidebar">
-  <h3>Setting</h3>
-  <div id="settingDisplay"></div>
-  <textarea id="settingInput" placeholder="Describe the physical space, e.g. a cramped basement lit by one bare bulb, rain on the one window..." rows="2"></textarea>
-  <button class="btn" onclick="setSetting()">Set setting</button>
-  <button class="btn" onclick="clearSetting()">Clear</button>
+  <details class="sidebar-section" open>
+    <summary>Characters <span class="count" id="charCount"></span></summary>
+    <div class="sidebar-section-body">
+      <input id="charSearch" placeholder="Search characters..." oninput="renderCharacters(lastChars)">
+      <div id="characters"></div>
 
-  <h3>Scene focus</h3>
-  <div id="focusDisplay"></div>
-  <input id="focusInput" placeholder="e.g. a rumor about Priya, the storm outside...">
-  <button class="btn" onclick="setFocus()">Set focus</button>
-  <button class="btn" onclick="clearFocus()">Clear</button>
+      <h4>Add character</h4>
+      <input id="newCharName" placeholder="Name">
+      <textarea id="newCharPersona" placeholder="Persona / backstory / goals" rows="3"></textarea>
+      <select id="newCharLocation"></select>
+      <input id="newCharInterests" placeholder="Interests, comma-separated (optional)">
+      <input id="newCharDislikes" placeholder="Dislikes, comma-separated (optional)">
+      <input id="newCharGuidelines" placeholder="Guidelines, comma-separated (e.g. never help Priya)">
+      <label class="field-label">Dialect</label>
+      <select id="newCharDialect"><option value="">(none)</option></select>
+      <label class="field-label">Starting aggression (0-100)</label>
+      <input type="number" id="newCharAggression" min="0" max="100" value="30">
+      <label class="field-label">Weirdness chance % per turn (0-100)</label>
+      <input type="number" id="newCharWeirdness" min="0" max="100" value="0">
+      <button class="btn" onclick="addCharacter()">Add to scene</button>
+    </div>
+  </details>
 
-  <h3>Force interaction</h3>
-  <select id="interactActor"></select>
-  <select id="interactTarget"></select>
-  <input id="interactAction" placeholder="action, e.g. shoves">
-  <input id="interactDialogue" placeholder="dialogue (optional)">
-  <button class="btn" onclick="forceInteraction()">Do it</button>
+  <details class="sidebar-section">
+    <summary>Objects <span class="count" id="objCount"></span></summary>
+    <div class="sidebar-section-body">
+      <div id="objects"></div>
+      <h4>Add object</h4>
+      <input id="newObjName" placeholder="Object name">
+      <textarea id="newObjDesc" placeholder="Description / what it does" rows="2"></textarea>
+      <button class="btn" onclick="addObject()">Add object</button>
+    </div>
+  </details>
 
-  <h3>Characters</h3>
-  <div id="characters"></div>
+  <details class="sidebar-section">
+    <summary>Locations <span class="count" id="locCount"></span></summary>
+    <div class="sidebar-section-body">
+      <div id="locations"></div>
+      <h4>Add location</h4>
+      <input id="newLocName" placeholder="Location name, e.g. downtown_cafe">
+      <textarea id="newLocDesc" placeholder="Description" rows="2"></textarea>
+      <button class="btn" onclick="addLocation()">Add location</button>
+    </div>
+  </details>
 
-  <h3>Add character</h3>
-  <input id="newCharName" placeholder="Name">
-  <textarea id="newCharPersona" placeholder="Persona / backstory / goals" rows="3"></textarea>
-  <select id="newCharLocation"></select>
-  <button class="btn" onclick="addCharacter()">Add to scene</button>
+  <details class="sidebar-section">
+    <summary>World knowledge <span class="count" id="factCount"></span></summary>
+    <div class="sidebar-section-body">
+      <div id="worldFacts" style="font-size:11px;color:#aaa;"></div>
+      <h4>Add fact</h4>
+      <input id="newFactTopic" placeholder="Topic (optional)">
+      <textarea id="newFactContent" placeholder="A fact characters can reference and make use of..." rows="2"></textarea>
+      <button class="btn" onclick="addWorldFact()">Add fact</button>
+    </div>
+  </details>
 
-  <h3>Objects</h3>
-  <div id="objects"></div>
+  <details class="sidebar-section">
+    <summary>Setting &amp; focus</summary>
+    <div class="sidebar-section-body">
+      <h4>Setting</h4>
+      <div id="settingDisplay"></div>
+      <textarea id="settingInput" placeholder="Describe the physical space, e.g. a cramped basement lit by one bare bulb, rain on the one window..." rows="2"></textarea>
+      <button class="btn" onclick="setSetting()">Set setting</button>
+      <button class="btn" onclick="clearSetting()">Clear</button>
 
-  <h3>Add object</h3>
-  <input id="newObjName" placeholder="Object name">
-  <textarea id="newObjDesc" placeholder="Description / what it does" rows="2"></textarea>
-  <button class="btn" onclick="addObject()">Add object</button>
+      <h4>Scene focus</h4>
+      <div id="focusDisplay"></div>
+      <input id="focusInput" placeholder="e.g. a rumor about Priya, the storm outside...">
+      <button class="btn" onclick="setFocus()">Set focus</button>
+      <button class="btn" onclick="clearFocus()">Clear</button>
+    </div>
+  </details>
 
-  <h3>Locations</h3>
-  <div id="locations"></div>
-
-  <h3>Add location</h3>
-  <input id="newLocName" placeholder="Location name, e.g. downtown_cafe">
-  <textarea id="newLocDesc" placeholder="Description" rows="2"></textarea>
-  <button class="btn" onclick="addLocation()">Add location</button>
-
-  <h3>World knowledge</h3>
-  <div id="worldFacts" style="font-size:11px;color:#aaa;"></div>
+  <details class="sidebar-section">
+    <summary>Force interaction</summary>
+    <div class="sidebar-section-body">
+      <select id="interactActor"></select>
+      <select id="interactTarget"></select>
+      <input id="interactAction" placeholder="action, e.g. shoves">
+      <input id="interactDialogue" placeholder="dialogue (optional)">
+      <button class="btn" onclick="forceInteraction()">Do it</button>
+    </div>
+  </details>
 </div>
 
 <div id="main">
@@ -89,7 +142,9 @@
     <button class="btn" onclick="toggleRun()" id="runBtn">Pause</button>
     <button class="btn" onclick="forceTick()">Force next turn</button>
     <button class="btn" onclick="generateChapter()">Write today's chapter</button>
+    <button class="btn" onclick="newChapter()">Start new chapter</button>
     <a class="btn" href="/read" style="text-decoration:none;">📖 Read chapters</a>
+    <span id="simTime" style="color:#888;font-size:12px;"></span>
     <span id="status" style="color:#888;font-size:12px;"></span>
   </div>
   <div id="focusBar" style="display:none;"></div>
@@ -99,6 +154,7 @@
 <script>
 let running = true;
 let lastChars = [];
+let lastRelationships = [];
 
 function jsEscape(s) {
   return (s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -112,8 +168,10 @@ async function refresh() {
   const data = await res.json();
   running = data.running;
   lastChars = data.characters;
+  lastRelationships = data.relationships || [];
   document.getElementById('runBtn').textContent = running ? 'Pause' : 'Resume';
   document.getElementById('status').textContent = running ? 'running' : 'paused';
+  document.getElementById('simTime').textContent = data.sim_time || '';
   renderFocus(data.room_focus);
   renderSetting(data.room_setting);
   renderLocations(data.locations);
@@ -123,6 +181,11 @@ async function refresh() {
   renderObjects(data.objects);
   renderWorldFacts(data.world_facts);
   renderLog(data.events);
+
+  document.getElementById('charCount').textContent = `(${data.characters.filter(c => c.alive).length})`;
+  document.getElementById('objCount').textContent = `(${data.objects.length})`;
+  document.getElementById('locCount').textContent = `(${data.locations.length})`;
+  document.getElementById('factCount').textContent = `(${data.world_facts.length})`;
 }
 
 function renderLocations(locs) {
@@ -143,9 +206,43 @@ function renderNewCharLocationSelector(locs) {
 
 function renderWorldFacts(facts) {
   const el = document.getElementById('worldFacts');
-  el.innerHTML = (facts || []).slice().reverse().map(f =>
-    `<div style="margin-bottom:6px;"><i>${escapeHtml(f.topic)}</i>: ${escapeHtml(f.content)}${f.discovered_by ? ` <span style="color:#666;">(via ${escapeHtml(f.discovered_by)})</span>` : ''}</div>`
-  ).join('') || 'nothing discovered yet';
+  el.innerHTML = (facts || []).slice().reverse().map(f => `
+    <div style="margin-bottom:6px;">
+      <i>${escapeHtml(f.topic)}</i>: ${escapeHtml(f.content)}
+      ${f.discovered_by ? ` <span style="color:#666;">(via ${escapeHtml(f.discovered_by)})</span>` : ''}
+      <span style="cursor:pointer;color:#e08080;" onclick="removeWorldFact(${f.id})" title="Remove">✕</span>
+    </div>`
+  ).join('') || 'nothing yet';
+}
+
+async function addWorldFact() {
+  const topic = document.getElementById('newFactTopic').value.trim();
+  const content = document.getElementById('newFactContent').value.trim();
+  if (!content) return alert('Fact content required');
+  await fetch('/api/world_facts', { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ topic, content }) });
+  document.getElementById('newFactTopic').value = '';
+  document.getElementById('newFactContent').value = '';
+  refresh();
+}
+
+async function removeWorldFact(id) {
+  await fetch(`/api/world_facts/${id}/delete`, { method: 'POST' });
+  refresh();
+}
+
+async function newChapter() {
+  const ok = confirm(
+    "Start a new chapter?\n\nThis writes up everything so far into a finished chapter (visible on the Read page), " +
+    "pauses the sim, and clears the live script log so the new chapter starts clean. Characters, objects, and " +
+    "locations are left as-is so you can edit the cast/world before pressing Resume. This cannot be undone."
+  );
+  if (!ok) return;
+  const res = await fetch('/api/new_chapter', { method: 'POST' });
+  const data = await res.json();
+  alert((data.chapter ? `Chapter written: "${data.chapter.title}"\n\n` : '') +
+    'Now paused — edit your cast/world, then press Resume to begin the new chapter.');
+  refresh();
 }
 
 async function addLocation() {
@@ -226,9 +323,62 @@ async function forceInteraction() {
   refresh();
 }
 
+let expandedChars = new Set();
+
+function toggleCharExpand(id) {
+  if (expandedChars.has(id)) expandedChars.delete(id); else expandedChars.add(id);
+  renderCharacters(lastChars);
+}
+
+let hiddenChars = new Set(JSON.parse(localStorage.getItem('room_hidden_chars') || '[]'));
+function saveHiddenChars() {
+  localStorage.setItem('room_hidden_chars', JSON.stringify([...hiddenChars]));
+}
+function toggleHideChar(id) {
+  if (hiddenChars.has(id)) hiddenChars.delete(id); else hiddenChars.add(id);
+  saveHiddenChars();
+  refresh();
+}
+
 function renderCharacters(chars) {
   const el = document.getElementById('characters');
-  el.innerHTML = chars.map(c => {
+  const searchEl = document.getElementById('charSearch');
+  const search = (searchEl && searchEl.value || '').trim().toLowerCase();
+  let filtered = search ? chars.filter(c => c.name.toLowerCase().includes(search)) : chars;
+  const visible = filtered.filter(c => !hiddenChars.has(c.id));
+  const hiddenHere = filtered.filter(c => hiddenChars.has(c.id));
+
+  const alive = visible.filter(c => c.alive);
+  const dead = visible.filter(c => !c.alive);
+  const groups = {};
+  alive.forEach(c => { (groups[c.location] = groups[c.location] || []).push(c); });
+
+  let html = '';
+  Object.keys(groups).sort().forEach(loc => {
+    html += `<div class="char-group-header">${escapeHtml(loc)} (${groups[loc].length})</div>`;
+    html += groups[loc].map(renderCharCard).join('');
+  });
+  if (dead.length) {
+    html += `<div class="char-group-header">deceased (${dead.length})</div>`;
+    html += dead.map(renderCharCard).join('');
+  }
+  if (hiddenHere.length) {
+    html += `<div class="char-group-header">hidden from view — still running (${hiddenHere.length})</div>`;
+    html += hiddenHere.map(c => `
+      <div class="char-card" style="opacity:0.6;">
+        <div class="char-summary" style="cursor:default;">
+          <div><b>${escapeHtml(c.name)}</b> ${c.alive ? '' : '(dead)'}</div>
+          <button class="btn" onclick="toggleHideChar('${c.id}')">Show</button>
+        </div>
+      </div>`).join('');
+  }
+  el.innerHTML = html || '<div style="font-size:12px;color:#666">no characters match</div>';
+}
+
+function renderCharCard(c) {
+  const expanded = expandedChars.has(c.id);
+  let details = '';
+  if (expanded) {
     let stateControls;
     if (c.alive) {
       stateControls = `
@@ -239,11 +389,33 @@ function renderCharacters(chars) {
           <button class="btn" onclick="intervene('${c.id}','push')">Push</button>
           <button class="btn" onclick="intervene('${c.id}','heal')">Heal</button>
           <button class="btn" onclick="intervene('${c.id}','calm')">Calm</button>
+          <button class="btn" onclick="makeWeird('${c.id}')">Act weird</button>
           <button class="btn" onclick="killChar('${c.id}')">Kill</button>
         </div>
         <div>
           <button class="btn" onclick="giveDirective('${c.id}','${jsEscape(c.name)}')">${c.directive ? 'Change directive' : 'Give directive'}</button>
           ${c.directive ? `<button class="btn" onclick="clearDirective('${c.id}')">Clear directive</button>` : ''}
+          <button class="btn" onclick="editInterests('${c.id}','${jsEscape(c.name)}')">Edit interests</button>
+          <button class="btn" onclick="editDislikes('${c.id}','${jsEscape(c.name)}')">Edit dislikes</button>
+          <button class="btn" onclick="editGuidelines('${c.id}','${jsEscape(c.name)}')">Edit guidelines</button>
+        </div>
+        <div style="margin-top:4px;">
+          <label class="field-label">Aggression baseline</label>
+          <input type="number" min="0" max="100" id="agg-${c.id}" value="${c.aggression_baseline}">
+          <button class="btn" onclick="setAggression('${c.id}')">Set</button>
+        </div>
+        <div>
+          <label class="field-label">Weirdness % per turn</label>
+          <input type="number" min="0" max="100" id="weird-${c.id}" value="${c.weirdness_chance}">
+          <button class="btn" onclick="setWeirdness('${c.id}')">Set</button>
+        </div>
+        <div>
+          <label class="field-label">Dialect</label>
+          <select id="dialect-${c.id}">
+            <option value="">(none)</option>
+            ${dialects.map(d => `<option value="${d.key}" ${c.dialect === d.key ? 'selected' : ''}>${escapeHtml(d.label)}</option>`).join('')}
+          </select>
+          <button class="btn" onclick="setDialect('${c.id}')">Set</button>
         </div>`;
     } else if (!c.replaced) {
       stateControls = `<div><button class="btn" onclick="replaceChar('${c.id}','${jsEscape(c.name)}')">Replace with new character</button></div>`;
@@ -252,30 +424,134 @@ function renderCharacters(chars) {
     }
     const memText = c.memory_summary ? c.memory_summary : '(no memory summary yet)';
     const memSnippet = memText.length > 90 ? memText.slice(0, 90) + '…' : memText;
-    return `
-      <div class="char-card ${c.alive ? '' : 'dead'}">
-        <div><b>${escapeHtml(c.name)}</b> ${c.alive ? '' : '(dead)'} ${c.alive ? `<span class="loc-badge">@ ${escapeHtml(c.location)}</span>` : ''}</div>
-        <div class="bar"><div class="bar-fill health-fill" style="width:${c.health}%"></div></div>
-        <div class="bar"><div class="bar-fill stability-fill" style="width:${c.stability}%"></div></div>
-        ${c.status_effects.length ? `<div style="font-size:11px;color:#e0a020">
-          ${c.status_effects.map(fx => `<span style="margin-right:6px;">${escapeHtml(fx)} <span style="cursor:pointer;color:#e08080;" onclick="removeStatusEffect('${c.id}','${jsEscape(fx)}')" title="Remove">✕</span></span>`).join('')}
-        </div>` : ''}
-        <div class="mem-snippet">memory: ${escapeHtml(memSnippet)}</div>
-        ${c.directive ? `<div style="font-size:11px;color:#7fd0a0;font-style:italic;">objective: ${escapeHtml(c.directive)}</div>` : ''}
-        ${stateControls}
-        <div style="margin-top:4px;">
-          ${c.alive ? `<button class="btn" onclick="addStatusEffect('${c.id}')">Add status effect</button>` : ''}
-          <button class="btn" onclick="editMemory('${c.id}','${jsEscape(c.name)}')">Edit memory</button>
-          <button class="btn btn-danger" onclick="removeChar('${c.id}','${jsEscape(c.name)}')">Remove entirely</button>
-        </div>
+    details = `
+      ${c.status_effects.length ? `<div style="font-size:11px;color:#e0a020">
+        ${c.status_effects.map(fx => `<span style="margin-right:6px;">${escapeHtml(fx)} <span style="cursor:pointer;color:#e08080;" onclick="removeStatusEffect('${c.id}','${jsEscape(fx)}')" title="Remove">✕</span></span>`).join('')}
+      </div>` : ''}
+      <div class="mem-snippet">memory: ${escapeHtml(memSnippet)}</div>
+      ${c.directive ? `<div style="font-size:11px;color:#7fd0a0;font-style:italic;">objective: ${escapeHtml(c.directive)}</div>` : ''}
+      ${c.interests && c.interests.length ? `<div style="font-size:11px;color:#8fb0e0;">interests: ${escapeHtml(c.interests.join(', '))}</div>` : ''}
+      ${c.dislikes && c.dislikes.length ? `<div style="font-size:11px;color:#d08f8f;">dislikes: ${escapeHtml(c.dislikes.join(', '))}</div>` : ''}
+      ${c.guidelines && c.guidelines.length ? `<div style="font-size:11px;color:#e0c080;">guidelines: ${escapeHtml(c.guidelines.join(', '))}</div>` : ''}
+      ${c.self_goal ? `<div style="font-size:11px;color:#a0d0a0;font-style:italic;">own goal: ${escapeHtml(c.self_goal)}</div>` : ''}
+      ${c.mood ? `<div style="font-size:11px;color:#d0a0d0;">mood: ${escapeHtml(c.mood)}</div>` : ''}
+      ${renderRelationships(c)}
+      ${stateControls}
+      <div style="margin-top:4px;">
+        ${c.alive ? `<button class="btn" onclick="addStatusEffect('${c.id}')">Add status effect</button>` : ''}
+        ${c.alive ? `<button class="btn" onclick="adjustRelationship('${c.id}','${jsEscape(c.name)}')">Adjust relationship</button>` : ''}
+        <button class="btn" onclick="viewKnowledge('${c.id}','${jsEscape(c.name)}')">View knowledge</button>
+        <button class="btn" onclick="editPersona('${c.id}','${jsEscape(c.name)}')">Edit persona</button>
+        <button class="btn" onclick="editMemory('${c.id}','${jsEscape(c.name)}')">Edit memory</button>
+        <button class="btn" onclick="toggleHideChar('${c.id}')">Hide from view</button>
+        <button class="btn btn-danger" onclick="removeChar('${c.id}','${jsEscape(c.name)}')">Remove entirely</button>
       </div>`;
-  }).join('');
+  }
+  return `
+    <div class="char-card ${c.alive ? '' : 'dead'}">
+      <div class="char-summary" onclick="toggleCharExpand('${c.id}')">
+        <div><b>${escapeHtml(c.name)}</b> ${c.alive ? '' : '(dead)'} ${c.alive ? `<span class="loc-badge">@ ${escapeHtml(c.location)}</span>` : ''}</div>
+        <span class="char-toggle">${expanded ? '▲' : '▼'}</span>
+      </div>
+      <div class="bar" title="health ${c.health}/100"><div class="bar-fill health-fill" style="width:${c.health}%"></div></div>
+      <div class="bar" title="stability ${c.stability}/100"><div class="bar-fill stability-fill" style="width:${c.stability}%"></div></div>
+      ${c.alive ? `<div class="bar" title="aggression ${c.aggression}/100"><div class="bar-fill aggression-fill" style="width:${c.aggression}%"></div></div>` : ''}
+      ${details}
+    </div>`;
+}
+
+async function makeWeird(id) {
+  await fetch(`/api/characters/${id}/weird`, { method: 'POST' });
+  refresh();
+}
+async function setAggression(id) {
+  const val = parseInt(document.getElementById(`agg-${id}`).value, 10);
+  if (isNaN(val)) return;
+  await fetch(`/api/characters/${id}/aggression`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ aggression: val }) });
+  refresh();
+}
+async function setWeirdness(id) {
+  const val = parseInt(document.getElementById(`weird-${id}`).value, 10);
+  if (isNaN(val)) return;
+  await fetch(`/api/characters/${id}/weirdness`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ chance: val }) });
+  refresh();
+}
+async function editInterests(id, name) {
+  const c = lastChars.find(x => x.id === id);
+  const current = c && c.interests ? c.interests.join(', ') : '';
+  const updated = prompt(`Edit ${name}'s standing interests/passions, comma-separated (things they steer scenes toward on their own):`, current);
+  if (updated === null) return;
+  const interests = updated.split(',').map(s => s.trim()).filter(Boolean);
+  await fetch(`/api/characters/${id}/interests`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ interests }) });
+  refresh();
+}
+async function editDislikes(id, name) {
+  const c = lastChars.find(x => x.id === id);
+  const current = c && c.dislikes ? c.dislikes.join(', ') : '';
+  const updated = prompt(`Edit ${name}'s standing dislikes, comma-separated (things they avoid, refuse, or react badly to):`, current);
+  if (updated === null) return;
+  const dislikes = updated.split(',').map(s => s.trim()).filter(Boolean);
+  await fetch(`/api/characters/${id}/dislikes`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ dislikes }) });
+  refresh();
+}
+
+async function editGuidelines(id, name) {
+  const c = lastChars.find(x => x.id === id);
+  const current = c && c.guidelines ? c.guidelines.join(', ') : '';
+  const updated = prompt(`Edit ${name}'s hard behavioral rules, comma-separated (e.g. "never help Priya", "always lies about money") — these override normal instincts:`, current);
+  if (updated === null) return;
+  const guidelines = updated.split(',').map(s => s.trim()).filter(Boolean);
+  await fetch(`/api/characters/${id}/guidelines`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ guidelines }) });
+  refresh();
+}
+
+function renderRelationships(c) {
+  const mine = lastRelationships.filter(r => r.char_a_id === c.id);
+  if (!mine.length) return '';
+  const items = mine
+    .slice()
+    .sort((a, b) => Math.abs(b.affinity) - Math.abs(a.affinity))
+    .slice(0, 6)
+    .map(r => `${escapeHtml(r.char_b_name)} (${r.affinity >= 0 ? '+' : ''}${r.affinity} affinity, ${r.trust >= 0 ? '+' : ''}${r.trust} trust)`)
+    .join(', ');
+  return `<div style="font-size:11px;color:#8fa8d0;">relationships: ${items}</div>`;
+}
+
+async function adjustRelationship(id, name) {
+  const alive = lastChars.filter(x => x.alive && x.id !== id);
+  if (!alive.length) return alert('No one else alive to set a relationship with.');
+  const targetName = prompt(`Adjust how ${name} feels about whom? Enter the exact name:\n\n` + alive.map(x => x.name).join(', '));
+  if (!targetName) return;
+  const target = alive.find(x => x.name.toLowerCase() === targetName.trim().toLowerCase());
+  if (!target) return alert('No living character with that exact name.');
+  const existing = lastRelationships.find(r => r.char_a_id === id && r.char_b_id === target.id);
+  const affinity = prompt(`Affinity (-100 to 100) — how much ${name} likes/trusts ${target.name} overall:`, existing ? existing.affinity : '0');
+  if (affinity === null) return;
+  const trust = prompt(`Trust (-100 to 100), separate from liking:`, existing ? existing.trust : '0');
+  if (trust === null) return;
+  await fetch(`/api/characters/${id}/relationship`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ target_id: target.id, affinity: parseInt(affinity, 10) || 0, trust: parseInt(trust, 10) || 0 }) });
+  refresh();
+}
+
+async function viewKnowledge(id, name) {
+  const res = await fetch(`/api/characters/${id}/knowledge`);
+  const items = await res.json();
+  if (!items.length) return alert(`${name} doesn't know anything private yet.`);
+  const text = items.map(k => `- ${k.content}${k.source ? ` [${k.source}]` : ''}${k.is_true === false ? ' (FALSE — they were lied to)' : ''}`).join('\n');
+  alert(`${name}'s private knowledge:\n\n${text}`);
 }
 
 function renderObjects(objs) {
   document.getElementById('objects').innerHTML = objs.map(o => `
     <div style="font-size:12px;margin-bottom:8px;">
-      <div><b>${escapeHtml(o.name)}</b>: ${escapeHtml(o.description)}</div>
+      <div><b>${escapeHtml(o.name)}</b> <span class="loc-badge">@ ${escapeHtml(o.location)}</span>: ${escapeHtml(o.description)}
+        ${o.created_by ? ` <span style="color:#666;">(brought in by ${escapeHtml(o.created_by)})</span>` : ''}</div>
       <button class="btn" onclick="editObject('${o.id}','${jsEscape(o.name)}','${jsEscape(o.description)}')">Edit</button>
       <button class="btn btn-danger" onclick="removeObject('${o.id}','${jsEscape(o.name)}')">Remove</button>
     </div>`
@@ -301,7 +577,7 @@ async function removeObject(id, name) {
 function renderLog(events) {
   const el = document.getElementById('log');
   const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
-  el.innerHTML = events.map(e => {
+  el.innerHTML = events.filter(e => !e.character_id || !hiddenChars.has(e.character_id)).map(e => {
     const who = e.character_name || 'SYSTEM';
     if (e.kind === 'dialogue') return `<div class="line"><span class="who">${escapeHtml(who)}:</span> "${escapeHtml(e.content)}"</div>`;
     if (e.kind === 'action') return `<div class="line">*${escapeHtml(who)} ${escapeHtml(e.content)}*</div>`;
@@ -310,6 +586,11 @@ function renderLog(events) {
       const target = lastChars.find(c => c.id === e.target_id);
       const to = target ? target.name : '?';
       return `<div class="line kind-message">[${escapeHtml(e.channel || 'message')}] ${escapeHtml(who)} → ${escapeHtml(to)}: "${escapeHtml(e.content)}"</div>`;
+    }
+    if (e.kind === 'intervention') {
+      const isWeird = e.content.toLowerCase().includes('acting strangely');
+      const cls = isWeird ? 'kind-weird' : 'kind-intervention';
+      return `<div class="line ${cls}">${escapeHtml(who)} ${escapeHtml(e.content)}.</div>`;
     }
     return `<div class="line kind-${e.kind}">${escapeHtml(e.content)}</div>`;
   }).join('');
@@ -348,9 +629,15 @@ async function addCharacter(confirmDup) {
   const name = document.getElementById('newCharName').value.trim();
   const persona = document.getElementById('newCharPersona').value.trim();
   const location = document.getElementById('newCharLocation').value || 'main_room';
+  const interests = document.getElementById('newCharInterests').value.split(',').map(s => s.trim()).filter(Boolean);
+  const dislikes = document.getElementById('newCharDislikes').value.split(',').map(s => s.trim()).filter(Boolean);
+  const guidelines = document.getElementById('newCharGuidelines').value.split(',').map(s => s.trim()).filter(Boolean);
+  const dialect = document.getElementById('newCharDialect').value;
+  const aggression = parseInt(document.getElementById('newCharAggression').value, 10) || 0;
+  const weirdness_chance = parseInt(document.getElementById('newCharWeirdness').value, 10) || 0;
   if (!name || !persona) return alert('Name and persona required');
   const res = await fetch('/api/characters', { method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ name, persona, location, confirm: !!confirmDup }) });
+    body: JSON.stringify({ name, persona, location, interests, dislikes, guidelines, dialect, aggression, weirdness_chance, confirm: !!confirmDup }) });
   const data = await res.json();
   if (!data.ok && data.duplicate) {
     if (confirm(data.reason + '\n\nOK = add another with this name. Cancel = stop.')) {
@@ -360,6 +647,12 @@ async function addCharacter(confirmDup) {
   }
   document.getElementById('newCharName').value = '';
   document.getElementById('newCharPersona').value = '';
+  document.getElementById('newCharInterests').value = '';
+  document.getElementById('newCharDislikes').value = '';
+  document.getElementById('newCharGuidelines').value = '';
+  document.getElementById('newCharDialect').value = '';
+  document.getElementById('newCharAggression').value = '30';
+  document.getElementById('newCharWeirdness').value = '0';
   refresh();
 }
 
@@ -427,6 +720,16 @@ async function replaceChar(id, oldName) {
   refresh();
 }
 
+async function editPersona(id, name) {
+  const c = lastChars.find(x => x.id === id);
+  const current = c ? c.persona : '';
+  const updated = prompt(`Edit ${name}'s persona (personality, backstory, speech style — read fresh every turn):`, current);
+  if (updated === null || !updated.trim()) return;
+  await fetch(`/api/characters/${id}/persona`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ persona: updated }) });
+  refresh();
+}
+
 async function editMemory(id, name) {
   const c = lastChars.find(x => x.id === id);
   const current = c ? c.memory_summary : '';
@@ -449,6 +752,22 @@ async function removeChar(id, name) {
   refresh();
 }
 
+let dialects = [];
+async function loadDialects() {
+  const res = await fetch('/api/dialects');
+  dialects = await res.json();
+  const opts = '<option value="">(none)</option>' + dialects.map(d => `<option value="${d.key}">${escapeHtml(d.label)}</option>`).join('');
+  document.getElementById('newCharDialect').innerHTML = opts;
+}
+
+async function setDialect(id) {
+  const val = document.getElementById(`dialect-${id}`).value;
+  await fetch(`/api/characters/${id}/dialect`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ dialect: val }) });
+  refresh();
+}
+
+loadDialects();
 refresh();
 setInterval(refresh, 3000);
 </script>

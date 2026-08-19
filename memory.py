@@ -3,16 +3,46 @@ from config import CFG
 from llm import call_llm
 
 
+def _relationship_note(char, other):
+    """How char feels about other, in a few words, plus the most recent
+    'significant events between us' if any exist — this is what turns a
+    generic rival into an earned grudge instead of vague hostility."""
+    rel = storage.get_relationship(char.id, other.id)
+    if rel.affinity >= 60:
+        feel = "loves"
+    elif rel.affinity >= 25:
+        feel = "likes"
+    elif rel.affinity <= -60:
+        feel = "hates"
+    elif rel.affinity <= -25:
+        feel = "dislikes"
+    else:
+        feel = "feels neutral about"
+    trust_note = ""
+    if rel.trust >= 50:
+        trust_note = ", trusts them"
+    elif rel.trust <= -50:
+        trust_note = ", distrusts them"
+    note = f"you {feel} {other.name}{trust_note}"
+    events = storage.list_relationship_events(char.id, other.id, limit=2)
+    if events:
+        note += " (" + "; ".join(e.description for e in events) + ")"
+    return note
+
+
 def build_prompt_context(char, all_chars, objects, recent_events):
     here = [c for c in all_chars if c.id != char.id and c.alive and c.location == char.location]
     others_desc = "\n".join(
         f"- {c.name}: health {c.health}/100, stability {c.stability}/100"
         + (f", status: {', '.join(c.status_effects)}" if c.status_effects else "")
+        + f" — {_relationship_note(char, c)}"
         for c in here
     ) or "(no one else is here)"
 
     elsewhere = [c for c in all_chars if c.id != char.id and c.alive and c.location != char.location]
-    elsewhere_desc = "\n".join(f"- {c.name} (at {c.location})" for c in elsewhere) or ""
+    elsewhere_desc = "\n".join(
+        f"- {c.name} (at {c.location}) — {_relationship_note(char, c)}" for c in elsewhere
+    ) or ""
 
     obj_desc = "\n".join(f"- {o.name}: {o.description}" for o in objects) or "(the room is empty of objects)"
 

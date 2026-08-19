@@ -13,18 +13,30 @@ HEAL_TEXT = "A warmth spreads through you, dulling every ache — whatever was h
 CALM_TEXT = "A deep, unnatural calm settles over you, quieting whatever was spiraling in your mind a moment ago."
 BREAK_TEXT = ("A jolt of clarity cuts through you mid-thought — whatever you were about to say or do again, "
               "the exact same way as before, don't. Do something genuinely different this time.")
+WEIRD_TEXT = ("Something in you shifts, unbidden — for this moment, you're not quite yourself. Act strangely and "
+              "unpredictably, whatever that means for you: an odd fixation, a non sequitur, a sudden mood swing, "
+              "talking to something that isn't there, an inexplicable urge acted on without hesitation. Commit to "
+              "it fully rather than just remarking on feeling strange.")
 
+
+# Every queue_intervention() call below passes a `label` — a short, plain
+# admin-facing summary ("was healed (+25 health)") shown in the script log
+# instead of the character's private flavor text, which stays reserved for
+# their own prompt (see simulation.py::_apply_pending_interventions). Without
+# this, the log line was just the raw flavor text with no indication of who
+# it applied to or what actually happened mechanically.
 
 def zap(char_id, intensity=15):
-    storage.queue_intervention(char_id, ZAP_TEXT, health_delta=-intensity, stability_delta=-intensity)
+    storage.queue_intervention(char_id, ZAP_TEXT, health_delta=-intensity, stability_delta=-intensity,
+                                label=f"was zapped (-{intensity} health/stability)")
 
 
 def heal(char_id, amount=25):
-    storage.queue_intervention(char_id, HEAL_TEXT, health_delta=amount)
+    storage.queue_intervention(char_id, HEAL_TEXT, health_delta=amount, label=f"was healed (+{amount} health)")
 
 
 def calm(char_id, amount=20):
-    storage.queue_intervention(char_id, CALM_TEXT, stability_delta=amount)
+    storage.queue_intervention(char_id, CALM_TEXT, stability_delta=amount, label=f"was calmed (+{amount} stability)")
 
 
 def insert_thought(char_id, thought_text):
@@ -32,26 +44,35 @@ def insert_thought(char_id, thought_text):
         char_id,
         f'An intrusive thought surfaces, unbidden: "{thought_text}"',
         stability_delta=-5,
+        label="had a thought inserted",
     )
 
 
 def disturb(char_id, intensity=10):
-    storage.queue_intervention(char_id, DISTURB_TEXT, stability_delta=-intensity)
+    storage.queue_intervention(char_id, DISTURB_TEXT, stability_delta=-intensity,
+                                label=f"was disturbed (-{intensity} stability)")
 
 
 def push(char_id, intensity=5):
-    storage.queue_intervention(char_id, PUSH_TEXT, health_delta=-intensity)
+    storage.queue_intervention(char_id, PUSH_TEXT, health_delta=-intensity, label=f"was pushed (-{intensity} health)")
 
 
 def custom(char_id, text, health_delta=0, stability_delta=0, status_effect=None):
-    """Escape hatch for anything not covered above — write your own stimulus text."""
+    """Escape hatch for anything not covered above — write your own stimulus text.
+    No label: the admin already wrote this text themselves, so it's shown as-is."""
     storage.queue_intervention(char_id, text, health_delta, stability_delta, status_effect)
 
 
 def force_break(char_id):
     """Watchdog-only (see watchdog.py): nudges a character out of a detected
     repetition loop. Not exposed on the dashboard — this fires automatically."""
-    storage.queue_intervention(char_id, BREAK_TEXT, stability_delta=-5)
+    storage.queue_intervention(char_id, BREAK_TEXT, stability_delta=-5, label="was nudged out of a repeated beat")
+
+
+def make_weird(char_id):
+    """Admin-triggered or auto-rolled (simulation.py, per-character weirdness_chance)
+    one-time nudge to act erratically this turn — not a lasting status effect."""
+    storage.queue_intervention(char_id, WEIRD_TEXT, stability_delta=-3, label="is acting strangely")
 
 
 def add_status_effect(char_id, effect, flavor_text=None):
@@ -59,4 +80,4 @@ def add_status_effect(char_id, effect, flavor_text=None):
     character and keeps showing up in their prompt every turn until removed —
     unlike the other interventions above, which are one-time stimuli."""
     text = flavor_text or f"Something changes in you, lasting: you are now {effect}."
-    storage.queue_intervention(char_id, text, status_effect=effect)
+    storage.queue_intervention(char_id, text, status_effect=effect, label=f"is now {effect}")
