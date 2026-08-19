@@ -69,11 +69,15 @@ def api_state():
     chars = storage.list_characters()
     objs = storage.list_objects()
     events = storage.get_recent_events(200)
+    locations = storage.list_locations()
+    world_facts = storage.list_world_facts(30)
     return {
         "running": RUNNING["on"],
         "characters": [c.__dict__ for c in chars],
         "objects": [o.__dict__ for o in objs],
         "events": [e.__dict__ for e in events],
+        "locations": [l.__dict__ for l in locations],
+        "world_facts": [f.__dict__ for f in world_facts],
         "room_focus": storage.get_room_focus("main_room"),
         "room_setting": storage.get_room_setting("main_room"),
     }
@@ -106,6 +110,7 @@ class NewCharacter(BaseModel):
     name: str
     persona: str
     confirm: bool = False  # set true to add anyway despite an alive name collision
+    location: str = "main_room"
 
 
 @app.post("/api/characters")
@@ -116,9 +121,12 @@ def api_add_character(body: NewCharacter):
             "ok": False, "duplicate": True,
             "reason": f'"{body.name}" is already alive in the room. Add another one with the same name anyway?',
         }
-    c = Character(id=str(uuid.uuid4())[:8], name=body.name, persona=body.persona)
+    location = body.location.strip() or "main_room"
+    if not storage.get_location(location):
+        storage.add_location(location)
+    c = Character(id=str(uuid.uuid4())[:8], name=body.name, persona=body.persona, location=location)
     storage.add_character(c)
-    storage.add_event("system", f"{c.name} enters the room.")
+    storage.add_event("system", f"{c.name} enters the scene, at {location}.", location=location)
     return {"ok": True, "character": c.__dict__}
 
 
@@ -241,6 +249,30 @@ def api_delete_object(obj_id: str):
     if o:
         storage.delete_object(obj_id)
         storage.add_event("system", f"The {o.name} is removed from the room.")
+    return {"ok": True}
+
+
+# ---------------- locations ----------------
+
+class NewLocation(BaseModel):
+    name: str
+    description: str = ""
+
+
+@app.post("/api/locations")
+def api_add_location(body: NewLocation):
+    name = body.name.strip()
+    if not name:
+        return {"ok": False, "reason": "name required"}
+    storage.add_location(name, body.description.strip())
+    return {"ok": True}
+
+
+@app.post("/api/locations/{name}/delete")
+def api_delete_location(name: str):
+    if name == "main_room":
+        return {"ok": False, "reason": "can't delete the default location"}
+    storage.delete_location(name)
     return {"ok": True}
 
 

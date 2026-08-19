@@ -4,21 +4,48 @@ from llm import call_llm
 
 
 def build_prompt_context(char, all_chars, objects, recent_events):
-    others = [c for c in all_chars if c.id != char.id and c.alive]
+    here = [c for c in all_chars if c.id != char.id and c.alive and c.location == char.location]
     others_desc = "\n".join(
         f"- {c.name}: health {c.health}/100, stability {c.stability}/100"
         + (f", status: {', '.join(c.status_effects)}" if c.status_effects else "")
-        for c in others
+        for c in here
     ) or "(no one else is here)"
+
+    elsewhere = [c for c in all_chars if c.id != char.id and c.alive and c.location != char.location]
+    elsewhere_desc = "\n".join(f"- {c.name} (at {c.location})" for c in elsewhere) or ""
 
     obj_desc = "\n".join(f"- {o.name}: {o.description}" for o in objects) or "(the room is empty of objects)"
 
-    log_desc = "\n".join(
-        (f"(SYSTEM: {e.content})" if e.kind in ("system", "death") else f"[{e.character_name or 'SYSTEM'}] {e.content}")
-        for e in recent_events
-    ) or "(nothing has happened yet)"
+    # Mark this character's own past lines distinctly ("[YOU as X]" vs
+    # "[Other]") so a less-steerable model doesn't have to infer authorship
+    # from name-matching alone — that's exactly the kind of ambiguity that
+    # leads to a character adopting or echoing someone else's lines as its
+    # own. See docs/model-choice.md for the "confusing/pretending to be each
+    # other" symptom this addresses.
+    name_by_id = {c.id: c.name for c in all_chars}
 
-    return others_desc, obj_desc, log_desc
+    def _speaker_label(e):
+        if e.character_id == char.id:
+            return f"YOU as {char.name}"
+        return e.character_name or "SYSTEM"
+
+    def _format_event(e):
+        if e.kind in ("system", "death"):
+            return f"(SYSTEM: {e.content})"
+        if e.kind == "message":
+            channel = e.channel or "message"
+            if e.character_id == char.id:
+                to = name_by_id.get(e.target_id, "someone")
+                return f"[YOU as {char.name}, {channel} to {to}] {e.content}"
+            return f"[{e.character_name or 'someone'}, {channel} to you] {e.content}"
+        return f"[{_speaker_label(e)}] {e.content}"
+
+    log_desc = "\n".join(_format_event(e) for e in recent_events) or "(nothing has happened yet)"
+
+    world_facts = storage.list_world_facts(CFG.world_facts_window)
+    world_desc = "\n".join(f"- {f.content}" for f in world_facts)
+
+    return others_desc, elsewhere_desc, obj_desc, log_desc, world_desc
 
 
 def maybe_summarize(char):

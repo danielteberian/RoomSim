@@ -10,9 +10,12 @@ from models import Character, SimObject
 
 storage.init_db()
 
+storage.add_location("main_room", "A shared living room where people tend to gather.")
+storage.add_location("downtown_cafe", "A small cafe a short walk from the main room.")
+
 characters = [
     Character(id="c1", name="Mara", persona="A retired locksmith in her 60s. Blunt, observant, quietly grieving her late husband. Speaks in short sentences."),
-    Character(id="c2", name="Devon", persona="A 24-year-old barista. Anxious, eager to please, terrified of confrontation, secretly writes poetry."),
+    Character(id="c2", name="Devon", persona="A 24-year-old barista. Anxious, eager to please, terrified of confrontation, secretly writes poetry.", location="downtown_cafe"),
     Character(id="c3", name="Priya", persona="A sharp-tongued lawyer in her 40s. Controlling, doesn't trust easily, has a soft spot for animals."),
     Character(id="c4", name="Oleg", persona="A former soldier in his 50s. Calm on the surface, struggles with intrusive memories, protective of the group."),
 ]

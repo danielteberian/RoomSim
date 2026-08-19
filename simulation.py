@@ -13,15 +13,23 @@ CHARACTER_SYSTEM_TEMPLATE = """You are role-playing as {name}, one character liv
 Persona: {persona}
 Stay strictly in character. You do not know you are an AI. Respond ONLY as {name} would, given everything below.
 Your current state: health {health}/100, emotional stability {stability}/100{status_line}.
+You are currently at: {location}
 Your standing memory of what's happened so far: {memory_summary}
 {status_effect_block}{setting_block}
-Other people currently in the room:
+Other people here with you right now (this is a closed-world fictional scene — these \
+are the only people who exist here; do not invent, address, mention, or compare anyone to a real-world celebrity \
+or public figure by name, even in passing — if you want to reference someone else, do it without naming a real \
+person). You are {name} and ONLY {name} — never speak, act, or think as if you were one of the people listed \
+below, even briefly, even to voice their side of things; that's their line to deliver on their own turn, not yours \
+to write for them:
 {others}
-
-Objects in the room:
+{elsewhere_block}
+Objects currently in your location (this list is authoritative and up to date — if \
+an object you remember from earlier isn't listed here, it's gone; don't act as if it's still present):
 {objects}
-{focus_block}{directive_block}
-Recent events (most recent last):
+{locations_block}{world_block}{focus_block}{directive_block}
+Recent events (most recent last — lines marked "YOU as {name}" are what you yourself already said or did; \
+every other name is someone else's line, not yours):
 {log}
 {stimuli_block}
 If the most recent line was directed at you or clearly invites a response, respond to it now, by name, rather \
@@ -43,8 +51,21 @@ do something (ideally both) — ask for the thing, reach for it, block the perso
 Total silence and stillness (both fields empty) is only for genuinely extreme cases like being unconscious or \
 bound and gagged — not a default or a safe choice.
 
+You also have a life beyond this one conversation. Every turn, on top of dialogue/action, you may optionally:
+- Move: set "move_to" to the exact name of a listed location to go there instead of staying put (leave it \
+empty to stay). You arrive there next turn and will no longer see or be seen by people in your old location \
+in person.
+- Message someone who isn't with you: fill "message_channel" (exactly "text", "email", or "call"), "message_to" \
+(the exact name of someone listed above, whether they're here or elsewhere), and "message_content" with what you \
+say. Leave all three empty if you're not messaging anyone this turn. This works even for people in another \
+location — that's the point of a phone/email — but use it for people who AREN'T in the room with you; if they're \
+right here, just talk to them instead.
+- Investigate/research something: set "investigate" to a short, specific topic you're actively looking into or \
+asking around about this turn (leave it empty most turns — only use it when your persona would genuinely be \
+digging for information, not as a substitute for talking or acting).
+
 Respond with ONLY a compact JSON object, no other text, in this exact shape:
-{{"thought": "a short private internal thought, not shown to others", "dialogue": "what you say out loud — should almost never be empty", "action": "a short physical action you take — should almost never be empty", "target": "name of another character your dialogue/action is directed at, or null"}}"""
+{{"thought": "a short private internal thought, not shown to others", "dialogue": "what you say out loud — should almost never be empty", "action": "a short physical action you take — should almost never be empty", "target": "name of another character your dialogue/action is directed at, or null", "move_to": "exact name of a location to travel to, or empty string", "message_channel": "text, email, or call, or empty string", "message_to": "exact name of who you're messaging, or empty string", "message_content": "the message, or empty string", "investigate": "a short topic you're looking into right now, or empty string"}}"""
 
 ADJUDICATOR_SYSTEM = """You are a neutral narrator for a life simulation. You are given one character's action \
 and/or dialogue directed at another character. Decide whether it causes the target physical harm, and if so \
@@ -57,6 +78,17 @@ Respond with ONLY JSON: {"harm": <int 0-100>, "reason": "<one short sentence>"}"
 
 _NO_CONTACT_PHRASES = ("no physical contact", "no direct contact", "no contact", "no direct threat",
                        "no direct physical", "without contact", "not physical")
+# Positive backstop: local models don't reliably follow ADJUDICATOR_SYSTEM's
+# "raised voices/posturing are NOT harm" instruction just because we ask nicely
+# (seen in practice: pure yelling scored as an injury). Rather than trust the
+# model to police its own reasoning, require the action text or its own stated
+# reason to actually name a contact-implying verb before any nonzero harm is
+# accepted at all — absence of one of these means it's not physical, full stop.
+_CONTACT_KEYWORDS = (
+    "hit", "punch", "kick", "stab", "throw", "shove", "grab", "slam", "cut", "strike",
+    "hurl", "wound", "contact", "slap", "push", "tackle", "strangl", "chok", "burn",
+    "bite", "claw", "smash", "crush", "trip", "knock", "swing", "kicked", "hurled",
+)
 
 
 def prioritize(char_id):
@@ -107,16 +139,24 @@ def _adjudicate_harm(actor, target, action_text, dialogue_text):
         f'{actor.name} does/says this, directed at {target.name}:\n'
         f'action="{action_text}"\ndialogue="{dialogue_text}"'
     )
-    result = call_llm_json(ADJUDICATOR_SYSTEM, user, max_tokens=150, model=CFG.adjudicator_model)
+    result = call_llm_json(ADJUDICATOR_SYSTEM, user, max_tokens=150, model=CFG.adjudicator_model,
+                            temperature=CFG.adjudicator_temperature)
     try:
         harm = int(result.get("harm", 0))
     except (TypeError, ValueError):
         harm = 0
     reason = as_text(result.get("reason", ""))
-    # Safety net: models occasionally contradict their own reasoning (say "no
+    # Safety net 1: models occasionally contradict their own reasoning (say "no
     # contact" but still return nonzero harm). Trust the stated reason over the number.
     if harm > 0 and any(p in reason.lower() for p in _NO_CONTACT_PHRASES):
         harm = 0
+    # Safety net 2: don't just trust the model to have followed "raised voices
+    # aren't harm" on its own — require an actual contact-implying word in the
+    # action text or its own reason before accepting any nonzero harm at all.
+    if harm > 0:
+        evidence = f"{action_text} {reason}".lower()
+        if not any(k in evidence for k in _CONTACT_KEYWORDS):
+            harm = 0
     return max(0, min(100, harm)), reason
 
 
@@ -131,6 +171,8 @@ def force_interaction(actor_id, target_id, action_text="", dialogue_text=""):
         return {"ok": False, "reason": "character not found"}
     if not actor.alive or not target.alive:
         return {"ok": False, "reason": "both characters must be alive"}
+    if actor.location != target.location:
+        return {"ok": False, "reason": "both characters must be in the same location for an in-person interaction"}
 
     action_text = (action_text or "").strip()
     dialogue_text = (dialogue_text or "").strip()
@@ -145,10 +187,10 @@ def force_interaction(actor_id, target_id, action_text="", dialogue_text=""):
 
     if dialogue_text:
         storage.add_event("dialogue", dialogue_text, character_id=actor.id, character_name=actor.name,
-                           target_id=target.id)
+                           target_id=target.id, location=actor.location)
     if display_action:
         storage.add_event("action", display_action, character_id=actor.id, character_name=actor.name,
-                           target_id=target.id)
+                           target_id=target.id, location=actor.location)
 
     harm, reason = _adjudicate_harm(actor, target, action_text, dialogue_text)
     if harm > 0:
@@ -166,6 +208,39 @@ def force_interaction(actor_id, target_id, action_text="", dialogue_text=""):
     return {"ok": True, "harm": harm, "reason": reason}
 
 
+def _find_char_by_name(chars, name):
+    if not name:
+        return None
+    name = name.strip().lower()
+    return next((c for c in chars if c.name.lower() == name), None)
+
+
+INVESTIGATE_SYSTEM = """You invent one single, concrete, specific fact about the wider fictional world of an \
+ongoing life simulation, in response to a character investigating or asking around about a topic. It should be \
+grounded and mundane-plausible (not supernatural or wildly dramatic), consistent with anything already known \
+about the world, and something that could plausibly color future scenes. 1-2 sentences, third person, no \
+meta-commentary, no mention of the character's name.
+Respond with ONLY JSON: {"fact": "<the new fact, 1-2 sentences>"}"""
+
+
+def _investigate(char, topic):
+    existing = storage.list_world_facts(CFG.world_facts_window)
+    existing_desc = "\n".join(f"- {f.content}" for f in existing) or "(nothing established yet)"
+    user = (
+        f"What's already known about the world:\n{existing_desc}\n\n"
+        f"A character is now investigating/asking around about: {topic}\n\n"
+        "Invent the fact they turn up."
+    )
+    result = call_llm_json(INVESTIGATE_SYSTEM, user, max_tokens=150, model=CFG.adjudicator_model,
+                            temperature=CFG.adjudicator_temperature + 0.3)
+    fact = as_text(result.get("fact")).strip()
+    if not fact:
+        return
+    storage.add_world_fact(topic, fact, discovered_by=char.name)
+    storage.add_event("system", f"{char.name} learns something, looking into \"{topic}\": {fact}",
+                       character_id=char.id, character_name=char.name, location=char.location)
+
+
 def tick():
     watchdog.record_tick()
     char = _next_character()
@@ -178,8 +253,23 @@ def tick():
 
     all_chars = storage.list_characters(alive_only=True)
     objects = storage.list_objects(location=char.location)
-    recent_events = storage.get_recent_events(CFG.memory_window)
-    others, obj_desc, log_desc = memory.build_prompt_context(char, all_chars, objects, recent_events)
+    recent_events = storage.get_recent_events_for_character(char, CFG.memory_window)
+    others, elsewhere, obj_desc, log_desc, world_desc = memory.build_prompt_context(char, all_chars, objects, recent_events)
+
+    elsewhere_block = (
+        f"\nPeople you know who are elsewhere right now (not in the room with you — you can't talk to them in "
+        f"person, but you can reach them by text/email/call using \"message_to\"):\n{elsewhere}\n"
+    ) if elsewhere else ""
+
+    all_locations = [l for l in storage.list_locations() if l.name != char.location]
+    locations_block = (
+        "\nOther places that exist, that you could travel to (set \"move_to\" to the exact name to go there):\n"
+        + "\n".join(f"- {l.name}" + (f": {l.description}" if l.description else "") for l in all_locations) + "\n"
+    ) if all_locations else ""
+
+    world_block = (
+        f"\nWhat's been learned about the wider world so far (things you or others have found out or been told):\n{world_desc}\n"
+    ) if world_desc else ""
 
     status_line = f", status effects: {', '.join(char.status_effects)}" if char.status_effects else ""
     status_effect_block = (
@@ -210,10 +300,13 @@ def tick():
     system = CHARACTER_SYSTEM_TEMPLATE.format(
         name=char.name, persona=char.persona, health=char.health, stability=char.stability,
         status_line=status_line, memory_summary=char.memory_summary or "(no strong memories yet)",
-        others=others, objects=obj_desc, log=log_desc, stimuli_block=stimuli_block, focus_block=focus_block,
-        setting_block=setting_block, directive_block=directive_block, status_effect_block=status_effect_block,
+        location=char.location, others=others, elsewhere_block=elsewhere_block, objects=obj_desc,
+        locations_block=locations_block, world_block=world_block, log=log_desc, stimuli_block=stimuli_block,
+        focus_block=focus_block, setting_block=setting_block, directive_block=directive_block,
+        status_effect_block=status_effect_block,
     )
-    result = call_llm_json(system, "Respond now, in character, as JSON only.")
+    result = call_llm_json(system, f"Respond now, in character as {char.name} — and only as {char.name}, "
+                                    f"never as anyone else in the room — in JSON only.")
 
     thought = as_text(result.get("thought")).strip()
     dialogue = as_text(result.get("dialogue")).strip()
@@ -222,14 +315,23 @@ def tick():
     if not isinstance(target_name, str):
         target_name = as_text(target_name).strip() or None
 
+    # These are independent of dialogue/action, so parsed once from the original
+    # attempt only — no need to re-derive them from the empty-dialogue retry below.
+    move_to = as_text(result.get("move_to")).strip()
+    message_channel = as_text(result.get("message_channel")).strip().lower()
+    message_to = as_text(result.get("message_to")).strip()
+    message_content = as_text(result.get("message_content")).strip()
+    investigate_topic = as_text(result.get("investigate")).strip()
+
     # Small/local models default to "just thinking" far too often — it's the path
     # of least resistance. One retry with a blunter instruction is cheap insurance
     # against a room full of characters who only ever want things and never do them.
     if not dialogue and not action:
         retry_result = call_llm_json(
             system,
-            "Respond now, in character, as JSON only. Your last instinct was to leave dialogue and action both "
-            "empty — that's not allowed. Say something out loud, or physically do something, right now.",
+            f"Respond now, in character as {char.name} — and only as {char.name} — in JSON only. Your last "
+            f"instinct was to leave dialogue and action both empty — that's not allowed. Say something out loud, "
+            f"or physically do something, right now.",
         )
         retry_dialogue = as_text(retry_result.get("dialogue")).strip()
         retry_action = as_text(retry_result.get("action")).strip()
@@ -240,6 +342,21 @@ def tick():
             if isinstance(retry_target, str) and retry_target:
                 target_name = retry_target
     target = next((c for c in all_chars if c.name == target_name), None)
+
+    # Both the original attempt AND the blunt retry can still come back with
+    # dialogue, action, AND thought all empty. Previously this logged nothing
+    # at all, so a stalled character was invisible in the script log (looked
+    # like "nothing ever happens" with no trace of why). watchdog.check_stall
+    # tracks consecutive stalls per character and auto-nudges after repeated
+    # ones; log every occurrence too so a single stall is visible immediately,
+    # not just once the streak trips the nudge.
+    if not thought and not dialogue and not action:
+        storage.add_event(
+            "system", f"[stall] {char.name} produced no dialogue, action, or thought this turn, "
+                      f"even after being told to.",
+            character_id=char.id, character_name=char.name,
+        )
+    watchdog.check_stall(char.id, char.name, thought, dialogue, action)
 
     if target and target.id != char.id and (dialogue or action):
         _priority_queue.append(target.id)
@@ -252,13 +369,13 @@ def tick():
         storage.update_character(char)
 
     if thought:
-        storage.add_event("thought", thought, character_id=char.id, character_name=char.name)
+        storage.add_event("thought", thought, character_id=char.id, character_name=char.name, location=char.location)
     if dialogue:
         storage.add_event("dialogue", dialogue, character_id=char.id, character_name=char.name,
-                           target_id=target.id if target else None)
+                           target_id=target.id if target else None, location=char.location)
     if action:
         storage.add_event("action", action, character_id=char.id, character_name=char.name,
-                           target_id=target.id if target else None)
+                           target_id=target.id if target else None, location=char.location)
 
     watchdog.check_repetition(char.id, char.name, dialogue, action)
 
@@ -283,5 +400,28 @@ def tick():
                 storage.add_event("death", f"{target.name} has died.",
                                    character_id=target.id, character_name=target.name)
                 watchdog.reset(target.id)
+
+    # A message reaches its recipient regardless of location — that's the whole
+    # point of a phone/email — so it's not gated on location like dialogue/action.
+    if message_channel in ("text", "email", "call") and message_to and message_content:
+        recipient = _find_char_by_name(all_chars, message_to)
+        if recipient and recipient.id != char.id:
+            storage.add_event("message", message_content, character_id=char.id, character_name=char.name,
+                               target_id=recipient.id, channel=message_channel)
+            prioritize(recipient.id)  # they react to it promptly, like a phone buzzing
+
+    if investigate_topic:
+        _investigate(char, investigate_topic)
+
+    # Applied last so the events above (dialogue/action/message) are logged at
+    # the location the character was actually in during this turn, not the one
+    # they're heading to.
+    if move_to:
+        dest = next((l for l in storage.list_locations() if l.name.lower() == move_to.lower()), None)
+        if dest and dest.name != char.location:
+            storage.add_event("system", f"{char.name} heads to {dest.name}.",
+                               character_id=char.id, character_name=char.name)
+            char.location = dest.name
+            storage.update_character(char)
 
     memory.maybe_summarize(char)

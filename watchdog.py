@@ -1,9 +1,12 @@
 """
-Circuit breaker for the simulation loop (ROBUSTNESS_TODO.md §1).
+Circuit breaker for the simulation loop (ROBUSTNESS_TODO.md §1, §7).
 
-Two independent safety nets:
+Three independent safety nets:
   - repetition detector: flags a character stuck repeating the same
     dialogue/action turn after turn, and auto-nudges them out of it.
+  - stall detector: flags a character producing nothing at all (empty
+    thought/dialogue/action, even after simulation.py's built-in retry)
+    turn after turn, and auto-nudges them too.
   - session tick cap: a blunt whole-room limit so a room stuck in any kind
     of loop can't run unattended forever.
 
@@ -21,6 +24,8 @@ _WORD_RE = re.compile(r"[a-z0-9']+")
 _repeat_counts = {}
 # char_id -> normalized word set from that character's last turn
 _last_turn_words = {}
+# char_id -> consecutive completely-empty turns seen so far
+_stall_counts = {}
 # total ticks this process has run (resets on restart, not persisted)
 _session_ticks = {"count": 0}
 
@@ -72,12 +77,39 @@ def check_repetition(char_id: str, char_name: str, dialogue: str, action: str) -
     return False
 
 
+def check_stall(char_id: str, char_name: str, thought: str, dialogue: str, action: str) -> bool:
+    """Call once per turn. A 'stall' is thought/dialogue/action ALL empty —
+    simulation.py::tick() already retries once with a blunter instruction
+    before calling this, so by the time this sees an empty turn, the model
+    has already ignored two direct instructions to do something. Unlike
+    check_repetition, an empty turn here counts *toward* the streak instead
+    of resetting it — that's the point, it's the opposite failure mode
+    (producing nothing instead of producing the same thing).
+    Returns True if the breaker tripped this turn (a nudge was queued)."""
+    if thought or dialogue or action:
+        _stall_counts[char_id] = 0
+        return False
+
+    _stall_counts[char_id] = _stall_counts.get(char_id, 0) + 1
+    if _stall_counts[char_id] >= CFG.repetition_repeat_threshold:
+        _stall_counts[char_id] = 0
+        interventions.force_break(char_id)
+        storage.add_event(
+            "system",
+            f"[watchdog] {char_name} has gone silent for several turns in a row — nudged to act.",
+            character_id=char_id, character_name=char_name,
+        )
+        return True
+    return False
+
+
 def reset(char_id: str):
-    """Clear a character's repetition tracking — call when they die, are
-    replaced, or are hard-deleted, so a fresh character never inherits a
-    dead one's repeat count."""
+    """Clear a character's repetition/stall tracking — call when they die,
+    are replaced, or are hard-deleted, so a fresh character never inherits a
+    dead one's counts."""
     _repeat_counts.pop(char_id, None)
     _last_turn_words.pop(char_id, None)
+    _stall_counts.pop(char_id, None)
 
 
 def record_tick():

@@ -15,7 +15,11 @@ same *sentence*, reworded, three turns in a row.
 
 ## What was added
 
-New module: **`watchdog.py`**. Two independent, always-on checks:
+New module: **`watchdog.py`**. Three independent, always-on checks (originally
+two — the stall detector was added after `dolphin3` was observed producing
+completely empty turns repeatedly, which the repetition detector doesn't
+catch since it resets on empty rather than counting it — see
+[`model-choice.md`](model-choice.md)):
 
 ### 1. Repetition detector
 
@@ -43,7 +47,27 @@ New module: **`watchdog.py`**. Two independent, always-on checks:
   different characters legitimately saying similar things (e.g. both
   arguing about the same object) is normal scene behavior, not a loop.
 
-### 2. Session tick cap
+### 2. Stall detector
+
+- The opposite failure mode from repetition: a character returns
+  completely empty `thought`/`dialogue`/`action` — not once (that's normal;
+  `simulation.py::tick()` already retries once with a blunter instruction
+  for that), but repeatedly, turn after turn, even after the retry.
+  Previously this was entirely silent — no `storage.add_event` fired for an
+  empty turn, so a stalled room looked like "nothing is happening" with
+  zero trace of why in the script log.
+- `watchdog.check_stall(char_id, char_name, thought, dialogue, action)`
+  runs right after the stall/retry logic in `tick()`. Unlike the repetition
+  counter, an empty turn *increments* the streak (repetition's counter does
+  the opposite — resets on empty, since silence isn't a repeat of anything).
+- Every single stalled turn now also logs a `[stall]` system event
+  immediately, independent of the counter — so a one-off stall is visible
+  right away, not just once `repetition_repeat_threshold` consecutive
+  stalls trip the auto-nudge (same `interventions.force_break` +
+  `[watchdog]` event as the repetition detector, and it reuses the same
+  `CFG.repetition_repeat_threshold` knob rather than adding a second one).
+
+### 3. Session tick cap
 
 - `watchdog.record_tick()` runs at the top of every `simulation.tick()`
   call, counting total ticks since the process started (not persisted
@@ -82,7 +106,7 @@ Tuning notes:
   looser paraphrases; raise it (e.g. `0.85`) to only catch near-verbatim
   repeats and tolerate more restating-with-variation.
 - Smaller/local models (which this sim's default backend now is — see
-  [`model-dolphin-mistral.md`](model-dolphin-mistral.md)) loop more than
+  [`model-choice.md`](model-choice.md)) loop more than
   Claude did, so the defaults were picked assuming a chattier, more
   repetition-prone model rather than tuned purely for Claude.
 - `max_ticks_per_session=500` at the default `SIM_TICK_SECONDS=15` is

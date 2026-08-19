@@ -30,6 +30,8 @@ def _format_log(events) -> str:
             lines.append(f"*{who} {e.content}*")
         elif e.kind == "thought":
             lines.append(f"({who} privately thought: {e.content})")
+        elif e.kind == "message":
+            lines.append(f'{who} sent a {e.channel or "message"}: "{e.content}"')
         elif e.kind in ("system", "death", "intervention"):
             lines.append(f"[{e.content}]")
     return "\n".join(lines)

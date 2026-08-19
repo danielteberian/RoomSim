@@ -24,6 +24,8 @@
   .kind-thought { color:#888; font-style:italic; }
   .kind-system, .kind-death { color:#e0a020; }
   .kind-intervention { color:#e05050; }
+  .kind-message { color:#9b7fd0; }
+  .loc-badge { font-size:10px; color:#7aa0c0; }
   #topbar { padding:8px 16px; background:#181818; border-bottom:1px solid #333; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   #focusBar { padding:6px 16px; background:#1c1710; border-bottom:1px solid #332a1a; font-size:12px; color:#d9a860; }
   input, textarea { background:#222; color:#eee; border:1px solid #444; border-radius:4px; padding:4px; width:100%; box-sizing:border-box; margin:2px 0; font-family:inherit; }
@@ -59,7 +61,8 @@
   <h3>Add character</h3>
   <input id="newCharName" placeholder="Name">
   <textarea id="newCharPersona" placeholder="Persona / backstory / goals" rows="3"></textarea>
-  <button class="btn" onclick="addCharacter()">Add to room</button>
+  <select id="newCharLocation"></select>
+  <button class="btn" onclick="addCharacter()">Add to scene</button>
 
   <h3>Objects</h3>
   <div id="objects"></div>
@@ -68,6 +71,17 @@
   <input id="newObjName" placeholder="Object name">
   <textarea id="newObjDesc" placeholder="Description / what it does" rows="2"></textarea>
   <button class="btn" onclick="addObject()">Add object</button>
+
+  <h3>Locations</h3>
+  <div id="locations"></div>
+
+  <h3>Add location</h3>
+  <input id="newLocName" placeholder="Location name, e.g. downtown_cafe">
+  <textarea id="newLocDesc" placeholder="Description" rows="2"></textarea>
+  <button class="btn" onclick="addLocation()">Add location</button>
+
+  <h3>World knowledge</h3>
+  <div id="worldFacts" style="font-size:11px;color:#aaa;"></div>
 </div>
 
 <div id="main">
@@ -102,10 +116,53 @@ async function refresh() {
   document.getElementById('status').textContent = running ? 'running' : 'paused';
   renderFocus(data.room_focus);
   renderSetting(data.room_setting);
+  renderLocations(data.locations);
+  renderNewCharLocationSelector(data.locations);
   renderCharacters(data.characters);
   renderInteractSelectors(data.characters);
   renderObjects(data.objects);
+  renderWorldFacts(data.world_facts);
   renderLog(data.events);
+}
+
+function renderLocations(locs) {
+  document.getElementById('locations').innerHTML = (locs || []).map(l => `
+    <div style="font-size:12px;margin-bottom:8px;">
+      <div><b>${escapeHtml(l.name)}</b>${l.description ? ': ' + escapeHtml(l.description) : ''}</div>
+      ${l.name !== 'main_room' ? `<button class="btn btn-danger" onclick="removeLocation('${jsEscape(l.name)}')">Remove</button>` : ''}
+    </div>`
+  ).join('') || '<div style="font-size:12px;color:#666">none yet</div>';
+}
+
+function renderNewCharLocationSelector(locs) {
+  const sel = document.getElementById('newCharLocation');
+  const prev = sel.value;
+  sel.innerHTML = (locs || []).map(l => `<option value="${escapeHtml(l.name)}">${escapeHtml(l.name)}</option>`).join('');
+  if ((locs || []).some(l => l.name === prev)) sel.value = prev;
+}
+
+function renderWorldFacts(facts) {
+  const el = document.getElementById('worldFacts');
+  el.innerHTML = (facts || []).slice().reverse().map(f =>
+    `<div style="margin-bottom:6px;"><i>${escapeHtml(f.topic)}</i>: ${escapeHtml(f.content)}${f.discovered_by ? ` <span style="color:#666;">(via ${escapeHtml(f.discovered_by)})</span>` : ''}</div>`
+  ).join('') || 'nothing discovered yet';
+}
+
+async function addLocation() {
+  const name = document.getElementById('newLocName').value.trim();
+  const description = document.getElementById('newLocDesc').value.trim();
+  if (!name) return alert('Name required');
+  await fetch('/api/locations', { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ name, description }) });
+  document.getElementById('newLocName').value = '';
+  document.getElementById('newLocDesc').value = '';
+  refresh();
+}
+
+async function removeLocation(name) {
+  if (!confirm(`Remove location "${name}"? Characters/objects still set to it will keep referencing it by name.`)) return;
+  await fetch(`/api/locations/${encodeURIComponent(name)}/delete`, { method: 'POST' });
+  refresh();
 }
 
 function renderFocus(focus) {
@@ -197,7 +254,7 @@ function renderCharacters(chars) {
     const memSnippet = memText.length > 90 ? memText.slice(0, 90) + '…' : memText;
     return `
       <div class="char-card ${c.alive ? '' : 'dead'}">
-        <div><b>${escapeHtml(c.name)}</b> ${c.alive ? '' : '(dead)'}</div>
+        <div><b>${escapeHtml(c.name)}</b> ${c.alive ? '' : '(dead)'} ${c.alive ? `<span class="loc-badge">@ ${escapeHtml(c.location)}</span>` : ''}</div>
         <div class="bar"><div class="bar-fill health-fill" style="width:${c.health}%"></div></div>
         <div class="bar"><div class="bar-fill stability-fill" style="width:${c.stability}%"></div></div>
         ${c.status_effects.length ? `<div style="font-size:11px;color:#e0a020">
@@ -249,6 +306,11 @@ function renderLog(events) {
     if (e.kind === 'dialogue') return `<div class="line"><span class="who">${escapeHtml(who)}:</span> "${escapeHtml(e.content)}"</div>`;
     if (e.kind === 'action') return `<div class="line">*${escapeHtml(who)} ${escapeHtml(e.content)}*</div>`;
     if (e.kind === 'thought') return `<div class="line kind-thought">(${escapeHtml(who)} thinks: ${escapeHtml(e.content)})</div>`;
+    if (e.kind === 'message') {
+      const target = lastChars.find(c => c.id === e.target_id);
+      const to = target ? target.name : '?';
+      return `<div class="line kind-message">[${escapeHtml(e.channel || 'message')}] ${escapeHtml(who)} → ${escapeHtml(to)}: "${escapeHtml(e.content)}"</div>`;
+    }
     return `<div class="line kind-${e.kind}">${escapeHtml(e.content)}</div>`;
   }).join('');
   if (atBottom) el.scrollTop = el.scrollHeight;
@@ -285,9 +347,10 @@ async function clearFocus() {
 async function addCharacter(confirmDup) {
   const name = document.getElementById('newCharName').value.trim();
   const persona = document.getElementById('newCharPersona').value.trim();
+  const location = document.getElementById('newCharLocation').value || 'main_room';
   if (!name || !persona) return alert('Name and persona required');
   const res = await fetch('/api/characters', { method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ name, persona, confirm: !!confirmDup }) });
+    body: JSON.stringify({ name, persona, location, confirm: !!confirmDup }) });
   const data = await res.json();
   if (!data.ok && data.duplicate) {
     if (confirm(data.reason + '\n\nOK = add another with this name. Cancel = stop.')) {

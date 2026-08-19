@@ -15,12 +15,16 @@ class Config:
 
     # Main "voice" model for characters. For the ollama backend this must exactly
     # match a model you've pulled on the host machine (see `ollama list`).
-    # Default is Dolphin-Mistral (7B) — see docs/model-dolphin-mistral.md for why
-    # this size was picked (8GB-VRAM AMD RX 590) and GPU-acceleration caveats.
-    model: str = os.environ.get("SIM_MODEL", "dolphin-mistral")
+    # Default is Hermes 3 (8B, Llama-3.1 base) — see docs/model-choice.md
+    # for the history of what was tried before this (Dolphin-Mistral, then
+    # Dolphin3) and why: Dolphin's uncensoring fine-tunes were trading away
+    # exactly the instruction/schema-following reliability this sim depends on
+    # (JSON compliance, state grounding, harm-judgment consistency). Hermes 3 was
+    # trained specifically for structured-output adherence.
+    model: str = os.environ.get("SIM_MODEL", "hermes3")
     # Model used only to referee whether an action causes harm to another character.
     # Cheap/fast on the Anthropic backend; can just be the same model on Ollama.
-    adjudicator_model: str = os.environ.get("SIM_ADJUDICATOR_MODEL", "dolphin-mistral")
+    adjudicator_model: str = os.environ.get("SIM_ADJUDICATOR_MODEL", "hermes3")
     db_path: str = os.environ.get("SIM_DB", "simulation.db")
     # Seconds between automatic turns. Also controls your API cost — raise this
     # if you want a slower, cheaper simulation.
@@ -31,10 +35,23 @@ class Config:
     summarize_every: int = 20
     # Sampling temperature (0-1 on Anthropic; roughly 0-2 on Ollama, though most
     # models are tuned around 0.7-1.0). Higher = less repetitive/more varied.
-    temperature: float = float(os.environ.get("SIM_TEMPERATURE", "1.0"))
+    # Lowered from 1.0: local 7-8B models are much less steerable than Claude at
+    # high temperature — they drift off the prompt (objects/directive/scene get
+    # ignored) instead of just sounding more "creative." See
+    # docs/model-choice.md.
+    temperature: float = float(os.environ.get("SIM_TEMPERATURE", "0.8"))
     # Ollama-only: penalizes tokens that already appeared recently, which is the
     # main lever against small local models looping the same line verbatim.
-    ollama_repeat_penalty: float = float(os.environ.get("SIM_OLLAMA_REPEAT_PENALTY", "1.3"))
+    # Lowered from 1.3 alongside temperature — too aggressive a repeat penalty
+    # pushes a less-steerable model away from natural, on-topic word choices too.
+    ollama_repeat_penalty: float = float(os.environ.get("SIM_OLLAMA_REPEAT_PENALTY", "1.15"))
+    # Separate, much lower temperature just for the harm-adjudicator call
+    # (simulation.py::_adjudicate_harm). That call is a consistent yes/no/how-much
+    # judgment, not creative writing — at the main temperature, a local model
+    # adjudicating its own peers' actions was hallucinating harm from harmless
+    # dialogue, producing unprovoked "fights." Low temperature makes it stick
+    # much closer to the ADJUDICATOR_SYSTEM instructions instead of improvising.
+    adjudicator_temperature: float = float(os.environ.get("SIM_ADJUDICATOR_TEMPERATURE", "0.2"))
 
     # --- watchdog / circuit breaker (see docs/watchdog.md) ---
     # Consecutive turns a character can repeat near-identical dialogue/action
@@ -45,6 +62,10 @@ class Config:
     # Auto-pause the whole session after this many total ticks (0 = disabled).
     # A blunt safety net so a stuck/looping room can't run unattended forever.
     max_ticks_per_session: int = int(os.environ.get("SIM_MAX_TICKS", "500"))
+
+    # How many recent shared world-knowledge facts (from characters investigating/
+    # researching things) are folded into each character's prompt.
+    world_facts_window: int = int(os.environ.get("SIM_WORLD_FACTS_WINDOW", "10"))
 
 
 CFG = Config()

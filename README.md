@@ -110,11 +110,11 @@ export SIM_ADJUDICATOR_MODEL=llama3.1:8b    # can be a smaller/faster model if y
 No `ANTHROPIC_API_KEY` needed in this mode.
 
 **Current defaults**: `SIM_BACKEND=ollama` and `SIM_MODEL`/
-`SIM_ADJUDICATOR_MODEL=dolphin-mistral` are now the built-in defaults in
+`SIM_ADJUDICATOR_MODEL=hermes3` are now the built-in defaults in
 `config.py` (no env vars required to get that setup) — see
-[`docs/model-dolphin-mistral.md`](docs/model-dolphin-mistral.md) for why
-that model/size was picked and for AMD RX 590 GPU-acceleration caveats. Set
-the env vars above to override with a different model/host.
+[`docs/model-choice.md`](docs/model-choice.md) for the history of what was
+tried before this and why. Set the env vars above to override with a
+different model/host.
 
 **Windows convenience**: `start_windows.bat` sets the four env vars above (for
 running on the same PC as Ollama) and starts the server in one step — after
@@ -143,7 +143,7 @@ The model is just a name in an env var — swapping it doesn't touch any code.
 
 1. **Pull it on the machine running Ollama** (your desktop, not the Pi):
    ```bash
-   ollama pull dolphin-mistral
+   ollama pull qwen2.5:7b-instruct
    ```
    Confirm it's there with `ollama list`.
 
@@ -154,16 +154,16 @@ The model is just a name in an env var — swapping it doesn't touch any code.
      harm between characters, so if you want the uncensored model driving that
      too, set both to the same name):
      ```bat
-     set SIM_MODEL=dolphin-mistral
-     set SIM_ADJUDICATOR_MODEL=dolphin-mistral
+     set SIM_MODEL=qwen2.5:7b-instruct
+     set SIM_ADJUDICATOR_MODEL=qwen2.5:7b-instruct
      ```
      Save the file and double-click it as usual — no other changes needed.
 
    - **Running `uvicorn` by hand / via a shell**: set the env vars before
      starting the server instead:
      ```bash
-     export SIM_MODEL=dolphin-mistral
-     export SIM_ADJUDICATOR_MODEL=dolphin-mistral
+     export SIM_MODEL=qwen2.5:7b-instruct
+     export SIM_ADJUDICATOR_MODEL=qwen2.5:7b-instruct
      uvicorn main:app --host 0.0.0.0 --port 8000
      ```
 
@@ -175,8 +175,8 @@ The model is just a name in an env var — swapping it doesn't touch any code.
    for the next couple of turns after restart. If dialogue style changes and
    there are no `[error during tick: ...]` system lines, it's working. An
    error there almost always means the model name doesn't exactly match what
-   `ollama list` shows (tags matter — `dolphin-mistral` and
-   `dolphin-mistral:8x7b` are different pulls).
+   `ollama list` shows (tags matter — `qwen2.5:7b-instruct` and plain
+   `qwen2.5:7b` are different pulls).
 
 You can point `SIM_MODEL` and `SIM_ADJUDICATOR_MODEL` at two *different*
 models too — e.g. a bigger, better one for character voice and a smaller/
@@ -226,8 +226,36 @@ journalctl -u roomsim -f     # watch logs
 - **Objects**: add anything with a name + description; it becomes part of every
   character's prompt from then on ("a rusted key on the windowsill", "a locked
   door", whatever you want).
+- **Locations**: add anything with a name + description ("downtown_cafe", "a
+  small cafe a short walk from the main room"). Every character always exists
+  at exactly one location — new characters default to `main_room` unless you
+  pick a different one when adding them.
 - **Pause / Resume / Force next turn**: pause the autoplay loop and step through
   turns manually when you want tighter control over pacing while writing.
+
+## Living apart: locations, messaging, and world knowledge
+
+Characters aren't confined to one room. Each character has a `location`, and
+on their turn the model can choose to:
+
+- **Move** — travel to any location you've added, ending their in-person scene
+  with whoever they left behind and starting one with whoever's at the new
+  spot next turn.
+- **Message** someone who isn't with them — a text, email, or call. This is
+  logged as its own line in the script log (`[text] Devon → Priya: ...`) and
+  reaches its recipient regardless of location, prompting them to react on
+  their next turn, same as being spoken to in person. Dialogue/actions still
+  only reach people actually in the same location — a character can't overhear
+  or physically interact with someone somewhere else.
+- **Investigate** a topic — a short "what does {name} find out" model call
+  invents one concrete fact about the wider world, which gets stored in a
+  shared world-knowledge base (visible in the sidebar) and folded into every
+  character's prompt going forward, so discoveries can actually shape the
+  story instead of staying private to whoever found them out.
+
+None of this is forced — a character who never has anyone to message and
+never wanders off will just keep behaving like it's a single-room sim, same as
+before this feature existed.
 
 ## Cost and pacing
 
@@ -241,8 +269,6 @@ cost.
 
 This is intentionally a minimal skeleton. Natural next steps:
 
-- **Multiple rooms**: `location` already exists on characters/objects; add a
-  room registry and let characters move between rooms.
 - **Relationships**: add a `relationships` table/JSON blob so characters
   remember how they feel about each specific other character, not just a
   general memory summary.
@@ -285,13 +311,13 @@ that's set correctly (`sudo raspi-config` → Localisation Options, or
 
 ```
 config.py           settings (env vars)
-models.py            Character / SimObject / Event dataclasses
+models.py            Character / SimObject / Location / WorldFact / Event dataclasses
 storage.py            SQLite layer
 llm.py                 Anthropic / Ollama backend wrapper
 memory.py               prompt context building + memory compression
 interventions.py         zap / insert_thought / disturb / push / custom
 watchdog.py                repetition detector + session tick cap (docs/watchdog.md)
-simulation.py                the turn loop + harm adjudication
+simulation.py                the turn loop + harm adjudication + movement/messaging/investigating
 chapters.py                    daily raw log → narrative chapter
 main.py                          FastAPI app: dashboard, reading page, control API
 templates/index.html              the admin dashboard UI

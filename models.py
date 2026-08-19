@@ -29,11 +29,29 @@ class SimObject:
 
 
 @dataclass
+class Location:
+    name: str                          # also the key used by Character/SimObject.location
+    description: str = ""
+    created_at: float = field(default_factory=time.time)
+
+
+@dataclass
+class WorldFact:
+    id: Optional[int]
+    topic: str
+    content: str
+    discovered_by: Optional[str]       # character name, for flavor/attribution
+    ts: float = field(default_factory=time.time)
+
+
+@dataclass
 class Event:
     id: Optional[int]
     ts: float
-    kind: str                          # dialogue | action | thought | system | intervention | death
+    kind: str                          # dialogue | action | thought | system | intervention | death | message
     character_id: Optional[str]
     character_name: Optional[str]
     content: str
     target_id: Optional[str] = None
+    location: Optional[str] = None     # where it happened; None = global/visible everywhere
+    channel: Optional[str] = None      # for kind="message": "text" | "email" | "call"

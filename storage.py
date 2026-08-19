@@ -5,7 +5,7 @@ import time
 from typing import List, Optional
 
 from config import CFG
-from models import Character, Event, SimObject
+from models import Character, Event, Location, SimObject, WorldFact
 
 
 def get_conn():
@@ -73,6 +73,18 @@ def init_db():
             setting TEXT,
             updated_at REAL
         );
+        CREATE TABLE IF NOT EXISTS locations (
+            name TEXT PRIMARY KEY,
+            description TEXT,
+            created_at REAL
+        );
+        CREATE TABLE IF NOT EXISTS world_facts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            topic TEXT,
+            content TEXT,
+            discovered_by TEXT,
+            ts REAL
+        );
         """
     )
     # Migration: `directive` was added to the characters table after initial release —
@@ -80,6 +92,22 @@ def init_db():
     cols = [r["name"] for r in conn.execute("PRAGMA table_info(characters)").fetchall()]
     if "directive" not in cols:
         conn.execute("ALTER TABLE characters ADD COLUMN directive TEXT DEFAULT ''")
+
+    # Migration: `location`/`channel` were added to events for multi-location
+    # living + email/text/call messages between characters who aren't in the
+    # same place.
+    event_cols = [r["name"] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
+    if "location" not in event_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN location TEXT")
+    if "channel" not in event_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN channel TEXT")
+
+    # Make sure the default location always exists so pre-existing rooms/characters
+    # (which all default to location="main_room") still resolve to a real location.
+    conn.execute(
+        "INSERT OR IGNORE INTO locations (name, description, created_at) VALUES (?,?,?)",
+        ("main_room", "", time.time()),
+    )
     conn.commit()
     conn.close()
 
@@ -219,26 +247,50 @@ def _row_to_event(r) -> Event:
     return Event(
         id=r["id"], ts=r["ts"], kind=r["kind"], character_id=r["character_id"],
         character_name=r["character_name"], content=r["content"], target_id=r["target_id"],
+        location=r["location"], channel=r["channel"],
     )
 
 
-def add_event(kind: str, content: str, character_id=None, character_name=None, target_id=None) -> Event:
+def add_event(kind: str, content: str, character_id=None, character_name=None, target_id=None,
+              location=None, channel=None) -> Event:
     conn = get_conn()
     ts = time.time()
     cur = conn.execute(
-        "INSERT INTO events (ts, kind, character_id, character_name, content, target_id) VALUES (?,?,?,?,?,?)",
-        (ts, kind, character_id, character_name, content, target_id),
+        "INSERT INTO events (ts, kind, character_id, character_name, content, target_id, location, channel) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (ts, kind, character_id, character_name, content, target_id, location, channel),
     )
     conn.commit()
     eid = cur.lastrowid
     conn.close()
-    return Event(id=eid, ts=ts, kind=kind, character_id=character_id,
-                 character_name=character_name, content=content, target_id=target_id)
+    return Event(id=eid, ts=ts, kind=kind, character_id=character_id, character_name=character_name,
+                 content=content, target_id=target_id, location=location, channel=channel)
 
 
 def get_recent_events(n: int = 50) -> List[Event]:
     conn = get_conn()
     rows = conn.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (n,)).fetchall()
+    conn.close()
+    return list(reversed([_row_to_event(r) for r in rows]))
+
+
+def get_recent_events_for_character(char, n: int = 50) -> List[Event]:
+    """What a character can plausibly perceive right now: in-person events that
+    happened in their own location, messages sent to/from them (regardless of
+    location — that's the whole point of a phone/email), and global system/
+    death/intervention events. Keeps someone in a different location from
+    reading dialogue they weren't there for, while still letting a text or
+    email reach them across the world."""
+    conn = get_conn()
+    rows = conn.execute(
+        """
+        SELECT * FROM events
+        WHERE (location = ? OR location IS NULL)
+           OR (kind = 'message' AND (character_id = ? OR target_id = ?))
+        ORDER BY id DESC LIMIT ?
+        """,
+        (char.location, char.id, char.id, n),
+    ).fetchall()
     conn.close()
     return list(reversed([_row_to_event(r) for r in rows]))
 
@@ -356,6 +408,64 @@ def get_room_setting(location: str) -> str:
     row = conn.execute("SELECT setting FROM room_setting WHERE location=?", (location,)).fetchone()
     conn.close()
     return row["setting"] if row and row["setting"] else ""
+
+
+# ---------------- locations (the wider world) ----------------
+
+def add_location(name: str, description: str = ""):
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO locations VALUES (?,?,?)",
+        (name, description, time.time()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_locations() -> List[Location]:
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM locations ORDER BY name").fetchall()
+    conn.close()
+    return [Location(name=r["name"], description=r["description"] or "", created_at=r["created_at"]) for r in rows]
+
+
+def get_location(name: str) -> Optional[Location]:
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM locations WHERE name=?", (name,)).fetchone()
+    conn.close()
+    return Location(name=row["name"], description=row["description"] or "", created_at=row["created_at"]) if row else None
+
+
+def delete_location(name: str):
+    conn = get_conn()
+    conn.execute("DELETE FROM locations WHERE name=?", (name,))
+    conn.commit()
+    conn.close()
+
+
+# ---------------- world facts (what characters have learned about their world) ----------------
+
+def add_world_fact(topic: str, content: str, discovered_by: Optional[str] = None) -> WorldFact:
+    conn = get_conn()
+    ts = time.time()
+    cur = conn.execute(
+        "INSERT INTO world_facts (topic, content, discovered_by, ts) VALUES (?,?,?,?)",
+        (topic, content, discovered_by, ts),
+    )
+    conn.commit()
+    fid = cur.lastrowid
+    conn.close()
+    return WorldFact(id=fid, topic=topic, content=content, discovered_by=discovered_by, ts=ts)
+
+
+def list_world_facts(limit: int = 30) -> List[WorldFact]:
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM world_facts ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    conn.close()
+    return [
+        WorldFact(id=r["id"], topic=r["topic"], content=r["content"], discovered_by=r["discovered_by"], ts=r["ts"])
+        for r in reversed(rows)
+    ]
 
 
 # ---------------- interventions queue ----------------

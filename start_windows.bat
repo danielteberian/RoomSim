@@ -6,12 +6,12 @@ REM If you later move the app to a Raspberry Pi and keep Ollama here on the
 REM desktop, change SIM_OLLAMA_HOST below to this PC's LAN IP (e.g.
 REM http://192.168.1.50:11434) and run this same set of commands there instead.
 
-REM See docs/model-dolphin-mistral.md for why this model was picked and for
+REM See docs/model-choice.md for why this model was picked and for
 REM AMD RX 590 GPU-acceleration notes/caveats.
 set SIM_BACKEND=ollama
 set SIM_OLLAMA_HOST=http://localhost:11434
-set SIM_MODEL=dolphin-mistral
-set SIM_ADJUDICATOR_MODEL=dolphin-mistral
+set SIM_MODEL=hermes3
+set SIM_ADJUDICATOR_MODEL=hermes3
 
 call venv\Scripts\activate.bat
 if errorlevel 1 (
