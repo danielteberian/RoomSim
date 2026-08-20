@@ -37,6 +37,12 @@ def _call_ollama(system: str, user: str, max_tokens: int, model: str, temperatur
             {"role": "user", "content": user},
         ],
         "stream": False,
+        # Keeps the model resident in VRAM between calls instead of Ollama's default
+        # 5-minute unload — without this, a gap between ticks (slow generation, a
+        # paused sim) evicts the model, and the next call pays a full reload before
+        # it can respond, which can outrun a proxy's connection timeout entirely
+        # (seen as "Remote end closed connection without response").
+        "keep_alive": CFG.ollama_keep_alive,
         "options": {
             "num_predict": max_tokens,
             "temperature": temperature,

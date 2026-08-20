@@ -1,6 +1,6 @@
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -32,6 +32,7 @@ class Character:
     needs_boredom: int = 0             # 0-100, rises when idle/repetitive, falls on novel actions
     needs_social: int = 0              # 0-100, rises when alone, falls around others
     needs_safety: int = 100            # 0-100 (100=safe), drops when harmed, slowly recovers
+    inventory: Dict[str, int] = field(default_factory=dict)  # item name -> count; found, made, or bartered goods
     created_at: float = field(default_factory=time.time)
 
 

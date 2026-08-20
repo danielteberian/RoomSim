@@ -1,17 +1,16 @@
 @echo off
-REM Quick-start for running the simulation on this same Windows machine,
-REM using the Ollama instance also running here (http://localhost:11434).
+REM Quick-start for running the simulation against a rented RunPod GPU
+REM (48GB card) running Ollama, instead of the local RX 590 (too weak for
+REM anything past an 8B model — see docs/model-choice.md).
 REM
-REM If you later move the app to a Raspberry Pi and keep Ollama here on the
-REM desktop, change SIM_OLLAMA_HOST below to this PC's LAN IP (e.g.
-REM http://192.168.1.50:11434) and run this same set of commands there instead.
-
-REM See docs/model-choice.md for why this model was picked and for
-REM AMD RX 590 GPU-acceleration notes/caveats.
+REM The pod must actually be RUNNING for this to work — RunPod bills per
+REM second while it's up, so stop it from the dashboard when you're not
+REM actively simulating. If you spin up a new pod, its proxy URL changes —
+REM update SIM_OLLAMA_HOST below to match.
 set SIM_BACKEND=ollama
-set SIM_OLLAMA_HOST=http://localhost:11434
-set SIM_MODEL=hermes3
-set SIM_ADJUDICATOR_MODEL=hermes3
+set SIM_OLLAMA_HOST=https://zn0hslixtop3ix-11434.proxy.runpod.net
+set SIM_MODEL=qwen2.5:32b-instruct-q8_0
+set SIM_ADJUDICATOR_MODEL=qwen2.5:32b-instruct-q8_0
 
 call venv\Scripts\activate.bat
 if errorlevel 1 (

@@ -6,6 +6,10 @@ replaced. You control the room from a web dashboard — add objects, add/replace
 characters, and reach in and mess with someone's head (zap, insert a thought,
 disturb, push).
 
+See [`docs/architecture.md`](docs/architecture.md) for how the code itself
+is put together (process model, the turn loop, prompt construction, data
+model) — this section is the short, user-facing version.
+
 ## How it works
 
 - **The Pi runs everything except the "thinking."** State (characters, objects,
@@ -257,6 +261,32 @@ None of this is forced — a character who never has anyone to message and
 never wanders off will just keep behaving like it's a single-room sim, same as
 before this feature existed.
 
+## Economy: gathering and bartering
+
+There's no built-in currency — characters carry an `inventory` of named items
+(counts only, e.g. `3 lemon, 1 rock, 2 cup`), and on their turn they can:
+
+- **Gather** — pick up a natural material from wherever they currently are
+  (a lemon, a stick, a shell, seawater — whatever fits the location); 1-2
+  units land in their inventory. Not gated by a fixed recipe list — whatever
+  short item name the model produces is what gets tracked, so what counts as
+  "money" or "goods" is whatever the cast converges on, not something set in
+  advance.
+- **Give/sell/barter** — hand some quantity of a carried item to anyone
+  physically in the same location. This is how payment, trades, gifts, and
+  bribes all happen; it's one-directional per turn (like dialogue), so a
+  two-sided trade plays out as two people's turns in sequence, not a single
+  atomic swap. Only works on someone in the same location — you can't mail
+  someone a rock.
+
+Both mechanics are always available, regardless of whether the scenario is
+`locked` — see `seed.py` for a ready-made "marooned on an island, build the
+biggest lemonade stand business" setup that uses them, or set your own
+scenario/goal via the dashboard and let characters invent their own
+gather/trade items as they go. There's no built-in win condition or
+leaderboard — each character's current inventory shows in their dashboard
+card, so it's visible at a glance who's accumulating what.
+
 ## Cost and pacing
 
 Each automatic turn is 1 API call (character) + up to 1 more (harm adjudication,
@@ -311,7 +341,7 @@ that's set correctly (`sudo raspi-config` → Localisation Options, or
 
 ```
 config.py           settings (env vars)
-models.py            Character / SimObject / Location / WorldFact / Event dataclasses
+models.py            Character (incl. inventory) / SimObject / Location / WorldFact / Event dataclasses
 storage.py            SQLite layer
 llm.py                 Anthropic / Ollama backend wrapper
 memory.py               prompt context building + memory compression

@@ -89,7 +89,7 @@ Your current state: health {health}/100, emotional stability {stability}/100, ag
 ({aggression_label}){status_line}.
 You are currently at: {location}
 {time_block}Your standing memory of what's happened so far: {memory_summary}
-{status_effect_block}{mood_block}{needs_block}{setting_block}
+{status_effect_block}{mood_block}{needs_block}{inventory_block}{setting_block}
 Other people here with you right now (this is a closed-world fictional scene — these \
 are the only people who exist here; do not invent, address, mention, or compare anyone to a real-world celebrity \
 or public figure by name, even in passing — if you want to reference someone else, do it without naming a real \
@@ -174,6 +174,17 @@ _BULLET_NEW_OBJECT = (
     'when your action already implies producing something specific (pulling a knife, opening a bag of tools), not '
     'for anything you\'re just talking about.'
 )
+_BULLET_GATHER = (
+    '- Forage/gather: set "gather_item" to a short name of a natural material you find or pick up right where you '
+    'are (e.g. "stick", "rock", "shell", "lemon", "coconut", "vine", "seawater") — one or two get added to what '
+    'you\'re carrying. Leave empty most turns; only when your action already involves picking something up.'
+)
+_BULLET_GIVE = (
+    '- Give, sell, or barter something you\'re carrying: fill "give_item" (its exact name from what you\'re '
+    'carrying), "give_qty" (how many), and "give_to" (exact name of someone physically with you right now) to hand '
+    'it over — a payment, a trade, a bribe, a gift, whatever the moment calls for. Leave all three empty if you\'re '
+    'not handing anything over this turn. This only works on people actually in your location.'
+)
 _BULLET_GOAL = (
     '- Set or update your own current goal: "current_goal" is something YOU decide you want, separate from any '
     'objective given to you — a short phrase. Leave it empty to keep pursuing whatever you last set; change it '
@@ -202,7 +213,7 @@ def _life_bullets(locked: bool) -> str:
     bullets = [_BULLET_MOVE]
     if not locked:
         bullets += [_BULLET_MESSAGE, _BULLET_INVESTIGATE, _BULLET_EXPLORE]
-    bullets += [_BULLET_NEW_OBJECT, _BULLET_GOAL, _BULLET_MOOD, _BULLET_RELATIONSHIP]
+    bullets += [_BULLET_NEW_OBJECT, _BULLET_GATHER, _BULLET_GIVE, _BULLET_GOAL, _BULLET_MOOD, _BULLET_RELATIONSHIP]
     if not locked:
         bullets.append(_BULLET_LIE)
     return "\n".join(bullets)
@@ -227,6 +238,10 @@ def _response_schema(locked: bool) -> str:
     fields += [
         '"new_object_name": "a short name for something new you\'re bringing into the scene, or empty string"',
         '"new_object_description": "one sentence describing it, or empty string"',
+        '"gather_item": "short name of a natural material you\'re picking up where you are, or empty string"',
+        '"give_item": "exact name of something you\'re carrying to hand over, or empty string"',
+        '"give_qty": 0',
+        '"give_to": "exact name of who you\'re giving/selling/trading it to, or empty string"',
         '"current_goal": "your own current goal, or empty string to leave unchanged"',
         '"mood": "a short word/phrase for a transient mood shift, or empty string"',
         '"relationship_shift": 0',
@@ -540,6 +555,13 @@ def _knowledge_block(char):
     )
 
 
+def _inventory_block(char):
+    if not char.inventory:
+        return "\nWhat you're carrying: nothing right now.\n"
+    items = ", ".join(f"{qty} {item}" for item, qty in char.inventory.items() if qty > 0)
+    return f"\nWhat you're carrying, usable to trade, sell, barter, or build with: {items}\n"
+
+
 def _apply_relationship_shift(char, target, shift, reason_text):
     if not target or not shift:
         return
@@ -703,6 +725,7 @@ def _take_turn(char):
     mood_block = _mood_block(char, sim_minutes)  # may clear char.mood if it's decayed past CFG.mood_decay_minutes
     needs_block = _needs_block(char)
     knowledge_block = _knowledge_block(char)
+    inventory_block = _inventory_block(char)
     self_goal_block = (
         f"\nYour own current goal, something you decided you want yourself, separate from any objective given to "
         f"you: {char.self_goal}\n"
@@ -717,7 +740,8 @@ def _take_turn(char):
         stimuli_block=stimuli_block, focus_block=focus_block, setting_block=setting_block,
         directive_block=directive_block, interests_block=interests_block, dislikes_block=dislikes_block,
         status_effect_block=status_effect_block, guidelines_block=guidelines_block, mood_block=mood_block,
-        needs_block=needs_block, knowledge_block=knowledge_block, self_goal_block=self_goal_block,
+        needs_block=needs_block, knowledge_block=knowledge_block, inventory_block=inventory_block,
+        self_goal_block=self_goal_block,
         dialect_block=dialect_block, scenario_block=scenario_block,
         life_bullets=_life_bullets(locked), response_schema=_response_schema(locked),
     )
@@ -754,6 +778,13 @@ def _take_turn(char):
     explore_idea = _clean_opt(result.get("explore"))
     new_object_name = _clean_opt(result.get("new_object_name"))
     new_object_description = _clean_opt(result.get("new_object_description"))
+    gather_item = _clean_opt(result.get("gather_item"))
+    give_item = _clean_opt(result.get("give_item"))
+    give_to_name = _clean_opt(result.get("give_to"))
+    try:
+        give_qty = max(0, int(result.get("give_qty") or 0))
+    except (TypeError, ValueError):
+        give_qty = 0
     current_goal = _clean_opt(result.get("current_goal"))
     new_mood = _clean_opt(result.get("mood"))
     lie_to = _clean_opt(result.get("lie_to"))
@@ -898,6 +929,31 @@ def _take_turn(char):
     if new_object_name and new_object_description:
         _create_object(char, new_object_name, new_object_description)
         did_something_novel = True
+
+    if gather_item:
+        qty = random.randint(1, 2)
+        char.inventory[gather_item] = char.inventory.get(gather_item, 0) + qty
+        storage.add_event(
+            "system", f"{char.name} gathers {qty} {gather_item}{'s' if qty != 1 else ''}.",
+            character_id=char.id, character_name=char.name, location=char.location,
+        )
+        did_something_novel = True
+
+    if give_item and give_qty > 0 and give_to_name:
+        recipient = _find_char_by_name(all_chars, give_to_name)
+        have = char.inventory.get(give_item, 0)
+        qty = min(give_qty, have)
+        if recipient and recipient.id != char.id and qty > 0 and recipient.location == char.location:
+            char.inventory[give_item] = have - qty
+            if char.inventory[give_item] <= 0:
+                del char.inventory[give_item]
+            recipient.inventory[give_item] = recipient.inventory.get(give_item, 0) + qty
+            storage.update_character(recipient)
+            storage.add_event(
+                "system", f"{char.name} hands over {qty} {give_item}{'s' if qty != 1 else ''} to {recipient.name}.",
+                character_id=char.id, character_name=char.name, target_id=recipient.id, location=char.location,
+            )
+            did_something_novel = True
 
     _decay_needs(char, all_chars, net_health, net_stability, did_something_novel or did_message)
 

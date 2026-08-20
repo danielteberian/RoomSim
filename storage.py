@@ -156,6 +156,8 @@ def init_db():
         conn.execute("ALTER TABLE characters ADD COLUMN dialect TEXT DEFAULT ''")
     if "active" not in cols:
         conn.execute("ALTER TABLE characters ADD COLUMN active INTEGER DEFAULT 1")
+    if "inventory" not in cols:
+        conn.execute("ALTER TABLE characters ADD COLUMN inventory TEXT DEFAULT '{}'")
 
     # Migration: `location`/`channel` were added to events for multi-location
     # living + email/text/call messages between characters who aren't in the
@@ -217,6 +219,7 @@ def _row_to_char(row) -> Character:
         needs_social=row["needs_social"] if row["needs_social"] is not None else 0,
         needs_safety=row["needs_safety"] if row["needs_safety"] is not None else 100,
         dialect=row["dialect"] or "",
+        inventory=json.loads(row["inventory"] or "{}"),
     )
 
 
@@ -234,8 +237,9 @@ def add_character(c: Character):
             (id, name, persona, health, stability, status_effects, location, alive, replaced,
              memory_summary, last_summary_event_id, created_at, directive, interests, dislikes,
              guidelines, aggression, aggression_baseline, weirdness_chance, self_goal, mood,
-             mood_set_at, needs_hunger, needs_boredom, needs_social, needs_safety, dialect, active)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             mood_set_at, needs_hunger, needs_boredom, needs_social, needs_safety, dialect, active,
+             inventory)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             c.id, c.name, c.persona, c.health, c.stability,
@@ -244,7 +248,7 @@ def add_character(c: Character):
             json.dumps(c.interests), json.dumps(c.dislikes), json.dumps(c.guidelines),
             c.aggression, c.aggression_baseline, c.weirdness_chance, c.self_goal, c.mood,
             c.mood_set_at, c.needs_hunger, c.needs_boredom, c.needs_social, c.needs_safety,
-            c.dialect, int(c.active),
+            c.dialect, int(c.active), json.dumps(c.inventory),
         ),
     )
     conn.commit()

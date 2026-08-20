@@ -525,6 +525,7 @@ function renderCharCard(c) {
       ${c.guidelines && c.guidelines.length ? `<div style="font-size:11px;color:#e0c080;">guidelines: ${escapeHtml(c.guidelines.join(', '))}</div>` : ''}
       ${c.self_goal ? `<div style="font-size:11px;color:#a0d0a0;font-style:italic;">own goal: ${escapeHtml(c.self_goal)}</div>` : ''}
       ${c.mood ? `<div style="font-size:11px;color:#d0a0d0;">mood: ${escapeHtml(c.mood)}</div>` : ''}
+      ${c.inventory && Object.keys(c.inventory).length ? `<div style="font-size:11px;color:#d0c070;">carrying: ${escapeHtml(Object.entries(c.inventory).map(([item, qty]) => `${qty} ${item}`).join(', '))}</div>` : ''}
       ${renderRelationships(c)}
       ${stateControls}
       <div style="margin-top:4px;">

@@ -261,6 +261,52 @@ often enough to be a real problem rather than an occasional slip, the next
 lever is the same one as everywhere else in this doc: lower `SIM_TEMPERATURE`
 further, or try a still-stronger instruction-following model.
 
+9. Moved off the RX 590 to a rented RunPod **A40 (48GB VRAM)** to run the
+   island/lemonade-stand economy scenario (`seed.py`), which adds several
+   more optional JSON fields per turn (`gather_item`, `give_item`/`give_qty`/
+   `give_to` on top of everything already in `_response_schema`) — more for
+   a model to track correctly per turn than the original room ever asked
+   for, so this was the point to size back up rather than stay on an 8B
+   model.
+
+   **Pick: `hermes3:70b`.** Reasoning: everything in steps 1-6 above was
+   about *structured-output/schema-adherence* being the actual bottleneck,
+   not raw writing quality — Hermes 3 (NousResearch, trained specifically
+   for reliable structured/function-calling output) already won that
+   tradeoff at 8B. `hermes3:70b` is the same lineage and same
+   steerability-first tuning at a much more capable size, so it inherits the
+   fixes in this doc rather than reopening the schema-adherence problem from
+   scratch the way switching families (e.g. to Qwen) would risk.
+   Q4_K_M quantization is ~40GB, comfortably inside 48GB with headroom for
+   this sim's long system prompt + context window.
+
+   ```bash
+   ollama pull hermes3:70b
+   ollama list       # confirm it's there, and check the actual tag/size
+   ```
+
+   ```bash
+   export SIM_MODEL=hermes3:70b
+   # The adjudicator call is a short, low-stakes yes/no/how-much judgment —
+   # doesn't need 70B. Keep it on the smaller model for speed; bump it too
+   # only if 8B-level adjudication quality becomes visibly the weak link.
+   export SIM_ADJUDICATOR_MODEL=hermes3
+   ```
+
+   **If 40GB turns out too tight** (context window pushes it over, or
+   another process is sharing the GPU): `qwen2.5:32b` (~20GB Q4) is the
+   fallback — not the same schema-tuned lineage as Hermes, but Qwen2.5's
+   instruction-following is strong enough in practice that it's a reasonable
+   downgrade rather than a re-opening of steps 1-6's problems from scratch.
+
+   **If more VRAM becomes available later:** the next real step up in this
+   same lineage is `hermes3:405b`, but that needs ~230GB+ even at Q4 — not
+   reachable by "adding a bit more VRAM," only by a fundamentally bigger
+   card/multi-GPU setup. Short of that, `hermes3:70b` at a higher
+   quantization (Q5_K_M/Q6_K, ~48-58GB) is the more realistic next step if
+   VRAM grows into the 64GB+ range, trading some headroom for slightly
+   better fidelity at the same parameter count.
+
 ## If swapping models doesn't fully fix grounding
 
 Beyond temperature/repeat-penalty tuning, the deeper fix is

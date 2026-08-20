@@ -45,6 +45,11 @@ class Config:
     # Lowered from 1.3 alongside temperature — too aggressive a repeat penalty
     # pushes a less-steerable model away from natural, on-topic word choices too.
     ollama_repeat_penalty: float = float(os.environ.get("SIM_OLLAMA_REPEAT_PENALTY", "1.15"))
+    # How long Ollama keeps the model loaded in VRAM after a call with no further
+    # requests ("-1" = forever, never unload). Matters most on a rented/remote GPU
+    # (e.g. RunPod) where a reload-from-cold before responding can outrun the
+    # tick loop or a proxy's connection timeout, surfacing as a dropped connection.
+    ollama_keep_alive: str = os.environ.get("SIM_OLLAMA_KEEP_ALIVE", "-1")
     # Separate, much lower temperature just for the harm-adjudicator call
     # (simulation.py::_adjudicate_harm). That call is a consistent yes/no/how-much
     # judgment, not creative writing — at the main temperature, a local model
