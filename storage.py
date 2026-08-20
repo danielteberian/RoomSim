@@ -113,6 +113,12 @@ def init_db():
             source TEXT,
             ts REAL
         );
+        CREATE TABLE IF NOT EXISTS scenario (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            premise TEXT DEFAULT '',
+            goal TEXT DEFAULT '',
+            locked INTEGER DEFAULT 0
+        );
         """
     )
     # Migration: `directive` was added to the characters table after initial release —
@@ -148,6 +154,8 @@ def init_db():
         conn.execute("ALTER TABLE characters ADD COLUMN needs_safety INTEGER DEFAULT 100")
     if "dialect" not in cols:
         conn.execute("ALTER TABLE characters ADD COLUMN dialect TEXT DEFAULT ''")
+    if "active" not in cols:
+        conn.execute("ALTER TABLE characters ADD COLUMN active INTEGER DEFAULT 1")
 
     # Migration: `location`/`channel` were added to events for multi-location
     # living + email/text/call messages between characters who aren't in the
@@ -177,6 +185,7 @@ def init_db():
         ("main_room", "", None, time.time()),
     )
     conn.execute("INSERT OR IGNORE INTO sim_clock (id, minutes) VALUES (1, 480)")  # start at 8:00 AM, day 1
+    conn.execute("INSERT OR IGNORE INTO scenario (id, premise, goal, locked) VALUES (1, '', '', 0)")
     conn.commit()
     conn.close()
 
@@ -189,6 +198,7 @@ def _row_to_char(row) -> Character:
         health=row["health"], stability=row["stability"],
         status_effects=json.loads(row["status_effects"] or "[]"),
         location=row["location"], alive=bool(row["alive"]), replaced=bool(row["replaced"]),
+        active=bool(row["active"]) if row["active"] is not None else True,
         memory_summary=row["memory_summary"] or "",
         last_summary_event_id=row["last_summary_event_id"] or 0,
         created_at=row["created_at"],
@@ -224,8 +234,8 @@ def add_character(c: Character):
             (id, name, persona, health, stability, status_effects, location, alive, replaced,
              memory_summary, last_summary_event_id, created_at, directive, interests, dislikes,
              guidelines, aggression, aggression_baseline, weirdness_chance, self_goal, mood,
-             mood_set_at, needs_hunger, needs_boredom, needs_social, needs_safety, dialect)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             mood_set_at, needs_hunger, needs_boredom, needs_social, needs_safety, dialect, active)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             c.id, c.name, c.persona, c.health, c.stability,
@@ -234,7 +244,7 @@ def add_character(c: Character):
             json.dumps(c.interests), json.dumps(c.dislikes), json.dumps(c.guidelines),
             c.aggression, c.aggression_baseline, c.weirdness_chance, c.self_goal, c.mood,
             c.mood_set_at, c.needs_hunger, c.needs_boredom, c.needs_social, c.needs_safety,
-            c.dialect,
+            c.dialect, int(c.active),
         ),
     )
     conn.commit()
@@ -261,12 +271,32 @@ def get_character(char_id: str) -> Optional[Character]:
     return _row_to_char(row) if row else None
 
 
-def list_characters(alive_only: bool = False) -> List[Character]:
+def list_characters(alive_only: bool = False, active_only: bool = False) -> List[Character]:
     conn = get_conn()
-    q = "SELECT * FROM characters" + (" WHERE alive=1" if alive_only else "")
+    clauses = []
+    if alive_only:
+        clauses.append("alive=1")
+    if active_only:
+        clauses.append("active=1")
+    q = "SELECT * FROM characters" + (" WHERE " + " AND ".join(clauses) if clauses else "")
     rows = conn.execute(q).fetchall()
     conn.close()
     return [_row_to_char(r) for r in rows]
+
+
+def set_active_roster(active_ids: List[str]):
+    """Marks exactly the given character ids active=1 and everyone else
+    active=0 — used when starting a new chapter with a chosen cast, so
+    benched characters stop ticking and stop appearing to the ones in play."""
+    active_ids = set(active_ids)
+    conn = get_conn()
+    all_ids = [r["id"] for r in conn.execute("SELECT id FROM characters").fetchall()]
+    conn.executemany(
+        "UPDATE characters SET active=? WHERE id=?",
+        [(1 if cid in active_ids else 0, cid) for cid in all_ids],
+    )
+    conn.commit()
+    conn.close()
 
 
 def kill_character(char_id: str):
@@ -754,6 +784,33 @@ def queue_intervention(char_id, text, health_delta=0, stability_delta=0, status_
     )
     conn.commit()
     conn.close()
+
+
+# ---------------- scenario (the standing premise for the current chapter) ----------------
+
+def get_scenario() -> dict:
+    conn = get_conn()
+    row = conn.execute("SELECT premise, goal, locked FROM scenario WHERE id=1").fetchone()
+    conn.close()
+    if not row:
+        return {"premise": "", "goal": "", "locked": False}
+    return {"premise": row["premise"] or "", "goal": row["goal"] or "", "locked": bool(row["locked"])}
+
+
+def set_scenario(premise: Optional[str] = None, goal: Optional[str] = None, locked: Optional[bool] = None):
+    """Any argument left as None keeps its current stored value unchanged."""
+    current = get_scenario()
+    new_premise = current["premise"] if premise is None else premise
+    new_goal = current["goal"] if goal is None else goal
+    new_locked = current["locked"] if locked is None else locked
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO scenario (id, premise, goal, locked) VALUES (1,?,?,?)",
+        (new_premise, new_goal, int(new_locked)),
+    )
+    conn.commit()
+    conn.close()
+    return {"premise": new_premise, "goal": new_goal, "locked": new_locked}
 
 
 def pop_pending_interventions(char_id):

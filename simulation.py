@@ -84,7 +84,7 @@ def format_sim_time(total_minutes):
 
 CHARACTER_SYSTEM_TEMPLATE = """You are role-playing as {name}, one character living in an ongoing, unscripted simulation.
 Persona: {persona}
-{dialect_block}{guidelines_block}Stay strictly in character. You do not know you are an AI. Respond ONLY as {name} would, given everything below.
+{dialect_block}{guidelines_block}{scenario_block}Stay strictly in character. You do not know you are an AI. Respond ONLY as {name} would, given everything below.
 Your current state: health {health}/100, emotional stability {stability}/100, aggression {aggression}/100 \
 ({aggression_label}){status_line}.
 You are currently at: {location}
@@ -135,41 +135,105 @@ and choices this turn — higher means a shorter fuse and blunter, more confront
 means more patience and conflict-avoidance — not just something you mention once and ignore.
 
 You also have a life beyond this one conversation. Every turn, on top of dialogue/action, you may optionally:
-- Move: set "move_to" to the exact name of a listed location to go there instead of staying put (leave it \
-empty to stay). You arrive there next turn and will no longer see or be seen by people in your old location \
-in person.
-- Message someone who isn't with you: fill "message_channel" (exactly "text", "email", or "call"), "message_to" \
-(the exact name of someone listed above, whether they're here or elsewhere), and "message_content" with what you \
-say. Leave all three empty if you're not messaging anyone this turn. This works even for people in another \
-location — that's the point of a phone/email — but use it for people who AREN'T in the room with you; if they're \
-right here, just talk to them instead.
-- Investigate/research something: set "investigate" to a short, specific topic you're actively looking into or \
-asking around about this turn (leave it empty most turns — only use it when your persona would genuinely be \
-digging for information, not as a substitute for talking or acting).
-- Explore: set "explore" to a short idea of a new kind of place you'd like to go check out that isn't in any list \
-above (leave it empty almost always — only when your persona would genuinely wander off looking for somewhere new, \
-within reason: a shop, a park, someone's apartment, not something wildly out of place).
-- Bring something new into the scene: if you'd genuinely pull out, grab, or otherwise produce an object that isn't \
-already listed above, set "new_object_name" (a short name) and "new_object_description" (one sentence) and it \
-becomes real, staying in this location for others to use too. Leave both empty almost always — only when your \
-action already implies producing something specific (pulling a knife, opening a bag of tools), not for anything \
-you're just talking about.
-- Set or update your own current goal: "current_goal" is something YOU decide you want, separate from any objective \
-given to you — a short phrase. Leave it empty to keep pursuing whatever you last set; change it when it's been \
-achieved, abandoned, or a new one genuinely takes over. This should persist across turns, not change every time.
-- Report your mood, if it's shifted: "mood" is a short word or phrase (e.g. "afraid", "elated", "humiliated") for a \
-transient emotional spike distinct from your baseline temperament — set it when something just happened that would \
-genuinely shift how you feel right now. Leave it empty most turns to let your last mood naturally fade over time \
-rather than resetting it constantly.
-- Update how you feel about whoever "target" is: "relationship_shift" is a small integer from -15 to 15 — positive \
-if this turn made you like/trust them more, negative if less, 0 or omitted if unchanged. This only applies when \
-"target" is set to someone.
-- Lie: if "message_to" is set and what you're telling them in "message_content" is a deliberate lie rather than the \
-truth, set "lie_to" to that same person's exact name. They won't know it's false. Leave empty for anything truthful \
-or for in-person dialogue (lying is only tracked through messages).
-
+{life_bullets}
 Respond with ONLY a compact JSON object, no other text, in this exact shape:
-{{"thought": "a short private internal thought, not shown to others", "dialogue": "what you say out loud — should almost never be empty", "action": "a short physical action you take — should almost never be empty", "target": "name of another character your dialogue/action is directed at, or null", "move_to": "exact name of a location to travel to, or empty string", "message_channel": "text, email, or call, or empty string", "message_to": "exact name of who you're messaging, or empty string", "message_content": "the message, or empty string", "investigate": "a short topic you're looking into right now, or empty string", "explore": "a short idea of somewhere new to check out, or empty string", "new_object_name": "a short name for something new you're bringing into the scene, or empty string", "new_object_description": "one sentence describing it, or empty string", "current_goal": "your own current goal, or empty string to leave unchanged", "mood": "a short word/phrase for a transient mood shift, or empty string", "relationship_shift": 0, "lie_to": "exact name of who you just lied to via message, or empty string"}}"""
+{response_schema}"""
+
+# --- "life beyond this one conversation" bullets, and the matching JSON schema fields, are
+# assembled conditionally below based on whether the scenario is locked. A locked scenario
+# (see storage.get_scenario) is a closed cast in a closed world — messaging, investigating,
+# and exploring are exactly the mechanics that hand a small local model a blank page to invent
+# new people/places on, so they're removed from the prompt entirely rather than just told not
+# to be used; fewer optional fields also means less for a less-steerable model to lose track of.
+_BULLET_MOVE = (
+    '- Move: set "move_to" to the exact name of a listed location to go there instead of staying put (leave it '
+    'empty to stay). You arrive there next turn and will no longer see or be seen by people in your old location '
+    'in person.'
+)
+_BULLET_MESSAGE = (
+    '- Message someone who isn\'t with you: fill "message_channel" (exactly "text", "email", or "call"), '
+    '"message_to" (the exact name of someone listed above, whether they\'re here or elsewhere), and '
+    '"message_content" with what you say. Leave all three empty if you\'re not messaging anyone this turn. This '
+    'works even for people in another location — that\'s the point of a phone/email — but use it for people who '
+    'AREN\'T in the room with you; if they\'re right here, just talk to them instead.'
+)
+_BULLET_INVESTIGATE = (
+    '- Investigate/research something: set "investigate" to a short, specific topic you\'re actively looking into '
+    'or asking around about this turn (leave it empty most turns — only use it when your persona would genuinely '
+    'be digging for information, not as a substitute for talking or acting).'
+)
+_BULLET_EXPLORE = (
+    '- Explore: set "explore" to a short idea of a new kind of place you\'d like to go check out that isn\'t in '
+    'any list above (leave it empty almost always — only when your persona would genuinely wander off looking for '
+    'somewhere new, within reason: a shop, a park, someone\'s apartment, not something wildly out of place).'
+)
+_BULLET_NEW_OBJECT = (
+    '- Bring something new into the scene: if you\'d genuinely pull out, grab, or otherwise produce an object that '
+    'isn\'t already listed above, set "new_object_name" (a short name) and "new_object_description" (one sentence) '
+    'and it becomes real, staying in this location for others to use too. Leave both empty almost always — only '
+    'when your action already implies producing something specific (pulling a knife, opening a bag of tools), not '
+    'for anything you\'re just talking about.'
+)
+_BULLET_GOAL = (
+    '- Set or update your own current goal: "current_goal" is something YOU decide you want, separate from any '
+    'objective given to you — a short phrase. Leave it empty to keep pursuing whatever you last set; change it '
+    'when it\'s been achieved, abandoned, or a new one genuinely takes over. This should persist across turns, not '
+    'change every time.'
+)
+_BULLET_MOOD = (
+    '- Report your mood, if it\'s shifted: "mood" is a short word or phrase (e.g. "afraid", "elated", "humiliated") '
+    'for a transient emotional spike distinct from your baseline temperament — set it when something just happened '
+    'that would genuinely shift how you feel right now. Leave it empty most turns to let your last mood naturally '
+    'fade over time rather than resetting it constantly.'
+)
+_BULLET_RELATIONSHIP = (
+    '- Update how you feel about whoever "target" is: "relationship_shift" is a small integer from -15 to 15 — '
+    'positive if this turn made you like/trust them more, negative if less, 0 or omitted if unchanged. This only '
+    'applies when "target" is set to someone.'
+)
+_BULLET_LIE = (
+    '- Lie: if "message_to" is set and what you\'re telling them in "message_content" is a deliberate lie rather '
+    'than the truth, set "lie_to" to that same person\'s exact name. They won\'t know it\'s false. Leave empty for '
+    'anything truthful or for in-person dialogue (lying is only tracked through messages).'
+)
+
+
+def _life_bullets(locked: bool) -> str:
+    bullets = [_BULLET_MOVE]
+    if not locked:
+        bullets += [_BULLET_MESSAGE, _BULLET_INVESTIGATE, _BULLET_EXPLORE]
+    bullets += [_BULLET_NEW_OBJECT, _BULLET_GOAL, _BULLET_MOOD, _BULLET_RELATIONSHIP]
+    if not locked:
+        bullets.append(_BULLET_LIE)
+    return "\n".join(bullets)
+
+
+def _response_schema(locked: bool) -> str:
+    fields = [
+        '"thought": "a short private internal thought, not shown to others"',
+        '"dialogue": "what you say out loud — should almost never be empty"',
+        '"action": "a short physical action you take — should almost never be empty"',
+        '"target": "name of another character your dialogue/action is directed at, or null"',
+        '"move_to": "exact name of a location to travel to, or empty string"',
+    ]
+    if not locked:
+        fields += [
+            '"message_channel": "text, email, or call, or empty string"',
+            '"message_to": "exact name of who you\'re messaging, or empty string"',
+            '"message_content": "the message, or empty string"',
+            '"investigate": "a short topic you\'re looking into right now, or empty string"',
+            '"explore": "a short idea of somewhere new to check out, or empty string"',
+        ]
+    fields += [
+        '"new_object_name": "a short name for something new you\'re bringing into the scene, or empty string"',
+        '"new_object_description": "one sentence describing it, or empty string"',
+        '"current_goal": "your own current goal, or empty string to leave unchanged"',
+        '"mood": "a short word/phrase for a transient mood shift, or empty string"',
+        '"relationship_shift": 0',
+    ]
+    if not locked:
+        fields.append('"lie_to": "exact name of who you just lied to via message, or empty string"')
+    return "{" + ", ".join(fields) + "}"
 
 ADJUDICATOR_SYSTEM = """You are a neutral narrator for a life simulation. You are given one character's action \
 and/or dialogue directed at another character. Decide whether it causes the target physical harm, and if so \
@@ -515,7 +579,7 @@ def _ordered_alive_characters():
     (messaged, spoken to, targeted) goes first so replies land promptly within
     the same round instead of only being read a full round later; everyone
     else follows in a stable order."""
-    chars = storage.list_characters(alive_only=True)
+    chars = storage.list_characters(alive_only=True, active_only=True)
     by_id = {c.id: c for c in chars}
     ordered = []
     seen = set()
@@ -566,7 +630,10 @@ def _take_turn(char):
     storage.update_character(char)
     char = storage.get_character(char.id)  # reload after any intervention/aggression updates
 
-    all_chars = storage.list_characters(alive_only=True)
+    scenario = storage.get_scenario()
+    locked = scenario["locked"]
+
+    all_chars = storage.list_characters(alive_only=True, active_only=True)
     objects = storage.list_objects(location=char.location)
     recent_events = storage.get_recent_events_for_character(char, CFG.memory_window)
     others, elsewhere, obj_desc, log_desc, world_desc = memory.build_prompt_context(char, all_chars, objects, recent_events)
@@ -574,7 +641,7 @@ def _take_turn(char):
     elsewhere_block = (
         f"\nPeople you know who are elsewhere right now (not in the room with you — you can't talk to them in "
         f"person, but you can reach them by text/email/call using \"message_to\"):\n{elsewhere}\n"
-    ) if elsewhere else ""
+    ) if elsewhere and not locked else ""
 
     all_locations = [l for l in storage.list_locations() if l.name != char.location]
     locations_block = (
@@ -622,6 +689,15 @@ def _take_turn(char):
         f"(turning things down, pushing back, visible discomfort), not just get mentioned once: {', '.join(char.dislikes)}\n"
     ) if char.dislikes else ""
 
+    roster_names = [c.name for c in all_chars]
+    scenario_block = ""
+    if scenario["premise"]:
+        scenario_block = (
+            f"\nThe scenario you and everyone else here are in, right now, no exceptions: {scenario['premise']} "
+            f"The complete cast of this scenario — the only people who exist, full stop — is: "
+            f"{', '.join(roster_names)}. Nobody else exists; don't invent, expect, or wait on anyone else.\n"
+        )
+
     dialect_block = _dialect_block(char)
     guidelines_block = _guidelines_block(char)
     mood_block = _mood_block(char, sim_minutes)  # may clear char.mood if it's decayed past CFG.mood_decay_minutes
@@ -642,10 +718,24 @@ def _take_turn(char):
         directive_block=directive_block, interests_block=interests_block, dislikes_block=dislikes_block,
         status_effect_block=status_effect_block, guidelines_block=guidelines_block, mood_block=mood_block,
         needs_block=needs_block, knowledge_block=knowledge_block, self_goal_block=self_goal_block,
-        dialect_block=dialect_block,
+        dialect_block=dialect_block, scenario_block=scenario_block,
+        life_bullets=_life_bullets(locked), response_schema=_response_schema(locked),
     )
+
+    # This closing reminder is deliberately repeated here (not just stated once, earlier
+    # in the system prompt) — it's the very last thing the model reads before generating,
+    # and for a less-steerable local model that recency matters far more than where the
+    # same instruction appeared 800 words earlier.
+    reminder_bits = [f"The only people who exist are: {', '.join(roster_names)}. Never invent or become anyone else."]
+    if scenario["premise"]:
+        reminder_bits.insert(0, f"Scenario: {scenario['premise']}")
+    if char.directive:
+        reminder_bits.append(f"Your outside-given objective, still unresolved unless you just completed it: {char.directive}")
+    if char.self_goal:
+        reminder_bits.append(f"Your own goal: {char.self_goal}")
+    closing_reminder = " ".join(reminder_bits)
     result = call_llm_json(system, f"Respond now, in character as {char.name} — and only as {char.name}, "
-                                    f"never as anyone else in the room — in JSON only.")
+                                    f"never as anyone else in the room — in JSON only. {closing_reminder}")
 
     thought = as_text(result.get("thought")).strip()
     dialogue = _strip_self_name(as_text(result.get("dialogue")).strip(), char.name)
@@ -672,6 +762,12 @@ def _take_turn(char):
     except (TypeError, ValueError):
         relationship_shift = 0
 
+    # Locked scenario: these mechanics were removed from the prompt/schema above, but a
+    # local model can still ignore that and emit them anyway — strip them so nothing
+    # downstream acts on invented lore even if it slips through.
+    if locked:
+        message_channel = message_to = message_content = investigate_topic = explore_idea = lie_to = ""
+
     # Small/local models default to "just thinking" far too often — it's the path
     # of least resistance. One retry with a blunter instruction is cheap insurance
     # against a room full of characters who only ever want things and never do them.
@@ -680,7 +776,7 @@ def _take_turn(char):
             system,
             f"Respond now, in character as {char.name} — and only as {char.name} — in JSON only. Your last "
             f"instinct was to leave dialogue and action both empty — that's not allowed. Say something out loud, "
-            f"or physically do something, right now.",
+            f"or physically do something, right now. {closing_reminder}",
         )
         retry_dialogue = _strip_self_name(as_text(retry_result.get("dialogue")).strip(), char.name)
         retry_action = _strip_self_name(as_text(retry_result.get("action")).strip(), char.name)

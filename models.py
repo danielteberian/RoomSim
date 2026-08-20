@@ -14,6 +14,7 @@ class Character:
     status_effects: List[str] = field(default_factory=list)
     location: str = "main_room"
     alive: bool = True
+    active: bool = True                # false = benched for the current chapter; skipped by tick(), invisible to others
     replaced: bool = False             # true once a dead character has been replaced
     memory_summary: str = ""           # compressed long-term memory
     last_summary_event_id: int = 0     # bookkeeping for memory compression

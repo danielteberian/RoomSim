@@ -126,6 +126,23 @@
   </details>
 
   <details class="sidebar-section">
+    <summary>Scenario</summary>
+    <div class="sidebar-section-body">
+      <div id="scenarioDisplay" style="font-size:12px;color:#aaa;margin-bottom:6px;"></div>
+      <h4>New chapter setup</h4>
+      <label class="field-label">Premise (the standing situation everyone is in)</label>
+      <textarea id="scenarioPremise" placeholder="e.g. You are all stranded on a deserted island. There is no boat, no signal, no rescue coming. It's just the six of you." rows="3"></textarea>
+      <label class="field-label">Shared goal (optional flavor, separate from per-character objectives)</label>
+      <input id="scenarioGoal" placeholder="e.g. figure out how to survive">
+      <label class="field-label"><input type="checkbox" id="scenarioLocked" style="width:auto;display:inline;"> Locked — closed cast, closed world (disables messaging/investigate/explore so nothing gets invented)</label>
+      <h4>Participants (unchecked = benched, skipped entirely this chapter)</h4>
+      <div id="chapterParticipants"></div>
+      <button class="btn" onclick="startNewChapter()">Start new chapter with this setup</button>
+      <div style="font-size:10px;color:#666;margin-top:4px;">Writes up today's events into a chapter, clears the live log, applies the roster/locations/goals above, and pauses — press Resume when ready.</div>
+    </div>
+  </details>
+
+  <details class="sidebar-section">
     <summary>Force interaction</summary>
     <div class="sidebar-section-body">
       <select id="interactActor"></select>
@@ -155,6 +172,9 @@
 let running = true;
 let lastChars = [];
 let lastRelationships = [];
+let lastLocations = [];
+let lastScenario = { premise: '', goal: '', locked: false };
+let participantChoices = {}; // char_id -> { included, location, directive } — sticky across refreshes while editing
 
 function jsEscape(s) {
   return (s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -174,9 +194,13 @@ async function refresh() {
   document.getElementById('simTime').textContent = data.sim_time || '';
   renderFocus(data.room_focus);
   renderSetting(data.room_setting);
+  lastLocations = data.locations || [];
   renderLocations(data.locations);
   renderNewCharLocationSelector(data.locations);
+  lastScenario = data.scenario || { premise: '', goal: '', locked: false };
+  renderScenario(lastScenario);
   renderCharacters(data.characters);
+  renderChapterParticipants(data.characters);
   renderInteractSelectors(data.characters);
   renderObjects(data.objects);
   renderWorldFacts(data.world_facts);
@@ -228,6 +252,71 @@ async function addWorldFact() {
 
 async function removeWorldFact(id) {
   await fetch(`/api/world_facts/${id}/delete`, { method: 'POST' });
+  refresh();
+}
+
+function renderScenario(s) {
+  const el = document.getElementById('scenarioDisplay');
+  el.innerHTML = s.premise
+    ? `<b>Current premise${s.locked ? ' (locked)' : ''}:</b> ${escapeHtml(s.premise)}${s.goal ? `<br><b>Goal:</b> ${escapeHtml(s.goal)}` : ''}`
+    : 'No scenario set — characters are free-roaming with no fixed premise.';
+  // Only pre-fill the edit fields once (on first load), so typing isn't clobbered by the poll loop.
+  if (!document.getElementById('scenarioPremise').dataset.touched) {
+    document.getElementById('scenarioPremise').value = s.premise || '';
+    document.getElementById('scenarioGoal').value = s.goal || '';
+    document.getElementById('scenarioLocked').checked = !!s.locked;
+  }
+}
+['scenarioPremise', 'scenarioGoal'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', () => { el.dataset.touched = '1'; });
+});
+
+function renderChapterParticipants(chars) {
+  const el = document.getElementById('chapterParticipants');
+  const alive = chars.filter(c => c.alive);
+  el.innerHTML = alive.map(c => {
+    if (!participantChoices[c.id]) {
+      participantChoices[c.id] = { included: !!c.active, location: c.location, directive: c.directive || '' };
+    }
+    const p = participantChoices[c.id];
+    const locOpts = lastLocations.map(l => `<option value="${escapeHtml(l.name)}" ${p.location === l.name ? 'selected' : ''}>${escapeHtml(l.name)}</option>`).join('');
+    return `
+      <div style="font-size:12px;margin-bottom:6px;padding:6px;background:#1c1c1c;border-radius:4px;">
+        <label><input type="checkbox" style="width:auto;display:inline;" ${p.included ? 'checked' : ''}
+          onchange="participantChoices['${c.id}'].included = this.checked"> <b>${escapeHtml(c.name)}</b></label>
+        <select onchange="participantChoices['${c.id}'].location = this.value" style="margin-top:2px;">${locOpts}</select>
+        <input placeholder="objective/goal for this chapter (blank = keep current)" value="${escapeHtml(p.directive)}"
+          onchange="participantChoices['${c.id}'].directive = this.value" style="margin-top:2px;">
+      </div>`;
+  }).join('') || '<div style="font-size:12px;color:#666">no living characters yet</div>';
+}
+
+async function startNewChapter() {
+  const included = Object.entries(participantChoices).filter(([id, p]) => p.included);
+  if (!included.length) return alert('Check at least one character to include in the new chapter.');
+  const ok = confirm(
+    "Start a new chapter with this setup?\n\nThis writes up everything so far into a finished chapter, pauses the " +
+    "sim, clears the live log, benches anyone left unchecked, and places the checked characters at their chosen " +
+    "locations/goals. This cannot be undone."
+  );
+  if (!ok) return;
+  const participants = included.map(([character_id, p]) => ({
+    character_id, location: p.location || 'main_room', directive: p.directive,
+  }));
+  const body = {
+    participants,
+    premise: document.getElementById('scenarioPremise').value.trim(),
+    goal: document.getElementById('scenarioGoal').value.trim(),
+    locked: document.getElementById('scenarioLocked').checked,
+  };
+  const res = await fetch('/api/new_chapter', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await res.json();
+  document.getElementById('scenarioPremise').dataset.touched = '';
+  document.getElementById('scenarioGoal').dataset.touched = '';
+  participantChoices = {};
+  alert((data.chapter ? `Chapter written: "${data.chapter.title}"\n\n` : '') +
+    'Now paused — review the setup, then press Resume to begin the new chapter.');
   refresh();
 }
 
@@ -391,6 +480,7 @@ function renderCharCard(c) {
           <button class="btn" onclick="intervene('${c.id}','calm')">Calm</button>
           <button class="btn" onclick="makeWeird('${c.id}')">Act weird</button>
           <button class="btn" onclick="killChar('${c.id}')">Kill</button>
+          <button class="btn" onclick="setActive('${c.id}', ${!c.active})">${c.active ? 'Bench (skip this chapter)' : 'Include again'}</button>
         </div>
         <div>
           <button class="btn" onclick="giveDirective('${c.id}','${jsEscape(c.name)}')">${c.directive ? 'Change directive' : 'Give directive'}</button>
@@ -450,7 +540,7 @@ function renderCharCard(c) {
   return `
     <div class="char-card ${c.alive ? '' : 'dead'}">
       <div class="char-summary" onclick="toggleCharExpand('${c.id}')">
-        <div><b>${escapeHtml(c.name)}</b> ${c.alive ? '' : '(dead)'} ${c.alive ? `<span class="loc-badge">@ ${escapeHtml(c.location)}</span>` : ''}</div>
+        <div><b>${escapeHtml(c.name)}</b> ${c.alive ? '' : '(dead)'} ${c.alive && !c.active ? '<span style="color:#888;">(benched)</span>' : ''} ${c.alive ? `<span class="loc-badge">@ ${escapeHtml(c.location)}</span>` : ''}</div>
         <span class="char-toggle">${expanded ? '▲' : '▼'}</span>
       </div>
       <div class="bar" title="health ${c.health}/100"><div class="bar-fill health-fill" style="width:${c.health}%"></div></div>
@@ -460,6 +550,11 @@ function renderCharCard(c) {
     </div>`;
 }
 
+async function setActive(id, active) {
+  await fetch(`/api/characters/${id}/active`, { method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ active }) });
+  refresh();
+}
 async function makeWeird(id) {
   await fetch(`/api/characters/${id}/weird`, { method: 'POST' });
   refresh();

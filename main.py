@@ -84,6 +84,7 @@ def api_state():
         "sim_time": simulation.format_sim_time(sim_minutes),
         "room_focus": storage.get_room_focus("main_room"),
         "room_setting": storage.get_room_setting("main_room"),
+        "scenario": storage.get_scenario(),
         "relationships": [
             {**r.__dict__, "char_a_name": name_by_id.get(r.char_a_id, "?"),
              "char_b_name": name_by_id.get(r.char_b_id, "?")}
@@ -161,6 +162,20 @@ def api_kill(char_id: str):
         storage.kill_character(char_id)
         storage.add_event("death", f"{c.name} has died.", character_id=char_id, character_name=c.name)
         watchdog.reset(char_id)
+    return {"ok": True}
+
+
+class Active(BaseModel):
+    active: bool  # false = bench them — skipped by the sim loop, invisible to everyone else — without killing/deleting
+
+
+@app.post("/api/characters/{char_id}/active")
+def api_set_active(char_id: str, body: Active):
+    c = storage.get_character(char_id)
+    if not c:
+        return {"ok": False, "reason": "not found"}
+    c.active = body.active
+    storage.update_character(c)
     return {"ok": True}
 
 
@@ -539,6 +554,24 @@ def api_interact(body: Interact):
     return simulation.force_interaction(body.actor_id, body.target_id, body.action or "", body.dialogue or "")
 
 
+# ---------------- scenario (the standing premise for the current chapter) ----------------
+
+class ScenarioConfig(BaseModel):
+    premise: Optional[str] = None  # the closed-world premise, e.g. "You are all stranded on a deserted island..."
+    goal: Optional[str] = None     # optional shared framing goal, separate from any per-character directive
+    locked: Optional[bool] = None  # true = disable messaging/investigate/explore (closed cast, closed world)
+
+
+@app.get("/api/scenario")
+def api_get_scenario():
+    return storage.get_scenario()
+
+
+@app.post("/api/scenario")
+def api_set_scenario(body: ScenarioConfig):
+    return storage.set_scenario(premise=body.premise, goal=body.goal, locked=body.locked)
+
+
 # ---------------- chapters ----------------
 
 class GenerateChapter(BaseModel):
@@ -554,18 +587,52 @@ def api_generate_chapter(body: GenerateChapter):
     return {"ok": True, "chapter": result}
 
 
+class ChapterParticipant(BaseModel):
+    character_id: str
+    location: str = "main_room"    # where they start this chapter
+    directive: Optional[str] = None  # None = leave their existing objective as-is; "" clears it
+
+
+class NewChapterSetup(BaseModel):
+    participants: List[ChapterParticipant] = []  # empty = don't touch the roster, everyone alive stays active
+    premise: Optional[str] = None
+    goal: Optional[str] = None
+    locked: Optional[bool] = None
+
+
 @app.post("/api/new_chapter")
-def api_new_chapter():
+def api_new_chapter(body: NewChapterSetup = NewChapterSetup()):
     """Wraps up whatever's happened so far into a written chapter (so nothing's
-    lost), pauses the sim, and clears the live script log — leaving characters,
-    objects, and locations in place for you to freely edit before pressing
-    Resume to start the new chapter. Chapters already written are untouched."""
+    lost), pauses the sim, and clears the live script log. If `participants` is
+    given, it also sets the active roster for the new chapter (everyone else is
+    benched — skipped by the sim loop and invisible to the ones in play) and
+    places each participant at their given starting location/objective. Pair
+    with a `premise`/`locked` scenario to confine them to it. Press Resume to
+    start the new chapter once you're happy with the setup."""
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     chapter = None
     if storage.has_events_for_date(today):
         chapter = chapters.generate_and_store_chapter(today)
     RUNNING["on"] = False
     storage.clear_events()
+
+    if body.participants:
+        storage.set_active_roster([p.character_id for p in body.participants])
+        for p in body.participants:
+            c = storage.get_character(p.character_id)
+            if not c:
+                continue
+            location = p.location.strip() or "main_room"
+            if not storage.get_location(location):
+                storage.add_location(location)
+            c.location = location
+            if p.directive is not None:
+                c.directive = p.directive.strip()
+            storage.update_character(c)
+
+    if body.premise is not None or body.goal is not None or body.locked is not None:
+        storage.set_scenario(premise=body.premise, goal=body.goal, locked=body.locked)
+
     storage.add_event("system", "A new chapter begins.")
     return {"ok": True, "chapter": chapter}
 
